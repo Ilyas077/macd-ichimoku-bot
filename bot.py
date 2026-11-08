@@ -4,10 +4,10 @@ import requests
 import os
 from datetime import datetime
 
-TG_TOKEN = "9105916544:AAGyQAXffLgHNGcKMjJMHH43qCvvjFLHIPw"
+TG_TOKEN = "9255233645:AAEyzaiaJbfUxSq0W0-E3jsi6ZHXig-F5h0"
 TG_CHAT_ID = "531386055"
 
-# Список из 26 волатильных монет для нового бота
+# Полный список из 26 волатильных монет для нового бота
 MONETS_DIV = {
     'BTC': 'BTCUSDT', 'ETH': 'ETHUSDT', 'SOL': 'SOLUSDT',
     'ENA': 'ENAUSDT', 'CAKE': 'CAKEUSDT', 'ENJ': 'ENJUSDT', 'PENDLE': 'PENDLEUSDT',
@@ -77,12 +77,10 @@ def scan_divergences(name, symbol):
         p_prev_zone = df.iloc[-15:-3]
         if len(p_prev_zone) < 10: return
         
-        # Бычья дивергенция (Цена упала, MACD вырос)
         min_price_prev = p_prev_zone['low'].min()
         idx_min_price = p_prev_zone['low'].idxmin()
         bull_div = (p_curr['low'] < min_price_prev) and (p_curr['macd'] > df.loc[idx_min_price, 'macd']) and (p_curr['macd'] < 0)
         
-        # Медвежья дивергенция (Цена выросла, MACD упал)
         max_price_prev = p_prev_zone['high'].max()
         idx_max_price = p_prev_zone['high'].idxmax()
         bear_div = (p_curr['high'] > max_price_prev) and (p_curr['macd'] < df.loc[idx_max_price, 'macd']) and (p_curr['macd'] > 0)
