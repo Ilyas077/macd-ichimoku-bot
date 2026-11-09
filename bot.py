@@ -7,7 +7,7 @@ from datetime import datetime
 TG_TOKEN = "9255233645:AAEyzaiaJbfUxSq0W0-E3jsi6ZHXig-F5h0"
 TG_CHAT_ID = "531386055"
 
-# Список из 26 волатильных монет
+# Список из 26 волатильных монет для жесткого Снайпер-режима
 MONETS_DIV = {
     'BTC': 'BTCUSDT', 'ETH': 'ETHUSDT', 'SOL': 'SOLUSDT',
     'ENA': 'ENAUSDT', 'CAKE': 'CAKEUSDT', 'ENJ': 'ENJUSDT', 'PENDLE': 'PENDLEUSDT',
@@ -18,6 +18,9 @@ MONETS_DIV = {
     'ICP': 'ICPUSDT', 'ATOM': 'ATOMUSDT'
 }
 
+WINDOW_4H = 4   
+WINDOW_15M = 6  
+
 def send_telegram(message):
     url = f"https://telegram.org{TG_TOKEN}/sendMessage"
     try:
@@ -25,14 +28,15 @@ def send_telegram(message):
     except Exception as e:
         print(f"Ошибка TG: {e}")
 
-def get_live_candles(symbol, limit=150):
+def get_live_candles(symbol, interval, limit=300):
+    bybit_map = {'4h': '240', '1h': '60', '15m': '15'}
     url = "https://bybit.com"
     try:
-        r = requests.get(url, params={'category': 'linear', 'symbol': symbol, 'interval': '60', 'limit': limit}, timeout=10).json()
+        r = requests.get(url, params={'category': 'linear', 'symbol': symbol, 'interval': bybit_map[interval], 'limit': limit}, timeout=10).json()
         if r.get('retCode') == 0 and r['result']['list']:
             rows = r['result']['list'][::-1]
             df = pd.DataFrame(rows, columns=['ts', 'open', 'high', 'low', 'close', 'vol', 'turn'])
-            for c in ['open', 'high', 'low', 'close', 'vol']: df[c] = df[c].astype(float)
+            for c in ['open', 'high', 'low', 'close']: df[c] = df[c].astype(float)
             df['datetime'] = pd.to_datetime(df['ts'].astype(int), unit='ms') + pd.Timedelta(hours=5)
             return df
     except Exception:
@@ -40,98 +44,84 @@ def get_live_candles(symbol, limit=150):
     return None
 
 def calculate_indicators(df):
-    if df is None or len(df) < 52: return None
+    if df is None: return None
+    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+    df['ema100'] = df['close'].ewm(span=100, adjust=False).mean()
+    df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
     
-    # 1. MACD (12, 26, 9)
-    df['ema12'] = df['close'].ewm(span=12, adjust=False).mean()
-    df['ema26'] = df['close'].ewm(span=26, adjust=False).mean()
-    df['macd'] = df['ema12'] - df['ema26']
-    df['signal_macd'] = df['macd'].ewm(span=9, adjust=False).mean()
-    df['hist'] = df['macd'] - df['signal_macd']
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    df['rsi'] = 100 - (100 / (1 + (gain / loss)))
     
-    # 2. ИШИМОКУ
-    df['tenkan'] = (df['high'].rolling(9).max() + df['low'].rolling(9).min()) / 2
-    df['kijun'] = (df['high'].rolling(26).max() + df['low'].rolling(26).min()) / 2
-    df['senkou_a'] = ((df['tenkan'] + df['kijun']) / 2).shift(26)
-    df['senkou_b'] = ((df['high'].rolling(52).max() + df['low'].rolling(52).min()) / 2).shift(26)
-    
-    # 3. ВНУТРИДНЕВНОЙ VWAP
-    tp = (df['high'] + df['low'] + df['close']) / 3
-    df['vwap'] = (tp * df['vol']).rolling(24).sum() / df['vol'].rolling(24).sum()
-    df['vwap'] = df['vwap'].fillna(df['close'].rolling(24).mean())
+    low_14 = df['low'].rolling(window=14).min()
+    high_14 = df['high'].rolling(window=14).max()
+    fast_k = 100 * (df['close'] - low_14) / (high_14 - low_14)
+    df['stoch_k'] = fast_k.rolling(window=3).mean()
+    df['stoch_d'] = df['stoch_k'].rolling(window=3).mean()
     return df
 
-def scan_market(name, symbol):
+def get_wave_pivots(df, window):
+    pivots = []
+    for i in range(window, len(df) - window):
+        is_high = df['high'].iloc[i] == df['high'].iloc[i-window:i+window+1].max()
+        is_low = df['low'].iloc[i] == df['low'].iloc[i-window:i+window+1].min()
+        c_date = df['datetime'].iloc[i].strftime('%d.%m %H:%M')
+        if is_high: pivots.append({'type': 'HIGH', 'price': df['high'].iloc[i], 'date': c_date})
+        elif is_low: pivots.append({'type': 'LOW', 'price': df['low'].iloc[i], 'date': c_date})
+    clean = []
+    for p in pivots:
+        if not clean or clean[-1]['type'] != p['type']: clean.append(p)
+    return clean
+
+def scan_market_sniper(name, symbol):
     try:
-        df = calculate_indicators(get_live_candles(symbol, limit=120))
-        if df is None: return
+        df_4h = calculate_indicators(get_live_candles(symbol, '4h', limit=150))
+        df_1h = calculate_indicators(get_live_candles(symbol, '1h', limit=150))
+        df_15m = calculate_indicators(get_live_candles(symbol, '15m', limit=200))
         
-        curr = df.iloc[-1]
-        cp = curr['close']
+        if df_4h is None or df_1h is None or df_15m is None: return
         
-        o, h, l, c = curr['open'], curr['high'], curr['low'], curr['close']
-        body = max(abs(c - o), 0.00001)
-        full_range = h - l
-        if full_range == 0: return
+        c4h = df_4h.iloc[-1]
+        c1h = df_1h.iloc[-1]
+        c15 = df_15m.iloc[-1]
+        cp = c15['close']
         
-        top_shadow = h - max(o, c)
-        bottom_shadow = min(o, c) - l
+        above_4h_200 = c4h['close'] > c4h['ema200']
+        under_4h_200 = c4h['close'] < c4h['ema200']
         
-        max_cloud = max(curr['senkou_a'], curr['senkou_b'])
-        min_cloud = min(curr['senkou_a'], curr['senkou_b'])
-        cloud_status = "🟢 Выше Облака" if cp > max_cloud else ("🔴 Ниже Облака" if cp < min_cloud else "🟡 Внутри Облака")
+        e_bull = (cp > c15['ema50']) and (c15['ema50'] > c15['ema100'] > c15['ema200'])
+        e_bear = (cp < c15['ema50']) and (c15['ema50'] < c15['ema100'] < c15['ema200'])
         
-        # -----------------------------------------------------------------
-        # ОБНОВЛЕННАЯ ПРОВЕРКА ПИН-БАРА (Мягкие условия 1.5х под ночной вертолет!)
-        # -----------------------------------------------------------------
-        # БЫЧИЙ ПИН-БАР (Тень снизу -> ЛОНГ)
-        if bottom_shadow > (body * 1.5) and top_shadow < (full_range * 0.3):
-            sl = round(l * 0.995, 4)
-            tp = round(curr['vwap'], 4) if cp < curr['vwap'] else round(cp * 1.02, 4)
-            send_telegram(f"📌 <b>ПИН-БАР: ЛОНГ #{name} (1H)</b>\n\n"
-                          f"🔥 Зафиксирован сильный выкуп фитилем снизу!\n"
-                          f"☁️ Ишимоку: {cloud_status}\n"
+        sk15, sd15 = c15['stoch_k'], c15['stoch_d']
+
+        # ЛОНГ СИГНАЛ (Отскок EMA50 по Бычьему тренду 4Н)
+        if above_4h_200 and e_bull and (abs(cp - c15['ema50']) / c15['ema50'] < 0.003) and (sk15 < 40 and sk15 > sd15):
+            sl = round(c15['ema100'] * 0.995, 4)
+            # Тейк-профит для быстрого скальпинга: забираем короткое движение 1.2% от входа
+            tp = round(cp * 1.012, 4)
+            send_telegram(f"🚀 <b>СНАЙПЕР-ЛОНГ #{name} (15М)</b>\n\n"
                           f"🛒 Вход: <code>{round(cp, 4)}</code>\n"
-                          f"🛡️ Короткий SL под хвост: <code>{sl}</code>\n"
-                          f"💰 Цель (VWAP/Тренд): <code>{tp}</code>")
+                          f"🛡️ Стоп-лосс (SL): <code>{sl}</code>\n"
+                          f"💰 Тейк-профит (TP): <code>{tp}</code>\n\n"
+                          f"📈 <i>Стратегия: Быстрый забор импульса от EMA50 по тренду. Не пересиживать!</i>")
             return
 
-        # МЕДВЕЖИЙ ПИН-БАР (Тень сверху -> ШОРТ)
-        if top_shadow > (body * 1.5) and bottom_shadow < (full_range * 0.3):
-            sl = round(h * 1.005, 4)
-            tp = round(curr['vwap'], 4) if cp > curr['vwap'] else round(cp * 0.98, 4)
-            send_telegram(f"📌 <b>ПИН-БАР: ШОРТ #{name} (1H)</b>\n\n"
-                          f"💥 Сильное давление продавцов фитилем сверху!\n"
-                          f"☁️ Ишимоку: {cloud_status}\n"
+        # ШОРТ СИГНАЛ (Отбой EMA50 по Медвежьему тренду 4Н — то, что косило ночью!)
+        elif under_4h_200 and e_bear and (abs(cp - c15['ema50']) / c15['ema50'] < 0.003) and (sk15 > 60 and sk15 < sd15):
+            sl = round(c15['ema100'] * 1.005, 4)
+            # Тейк-профит для быстрого скальпинга: забираем короткое движение 1.2% на падение
+            tp = round(cp * 0.988, 4)
+            send_telegram(f"🔴 <b>СНАЙПЕР-ШОРТ #{name} (15М)</b>\n\n"
                           f"🛒 Вход: <code>{round(cp, 4)}</code>\n"
-                          f"🛡️ Короткий SL над хвост: <code>{sl}</code>\n"
-                          f"💰 Цель (VWAP/Тренд): <code>{tp}</code>")
+                          f"🛡️ Стоп-лосс (SL): <code>{sl}</code>\n"
+                          f"💰 Тейк-профит (TP): <code>{tp}</code>\n\n"
+                          f"📉 <i>Стратегия: Быстрый забор импульса от EMA50 по тренду. Не пересиживать!</i>")
             return
-
-        # -----------------------------------------------------------------
-        # СТАНДАРТНАЯ ПРОВЕРКА ДИВЕРГЕНЦИЙ MACD
-        # -----------------------------------------------------------------
-        p_prev_zone = df.iloc[-15:-3]
-        if len(p_prev_zone) < 10: return
-        
-        min_price_prev = p_prev_zone['low'].min()
-        idx_min_price = p_prev_zone['low'].idxmin()
-        bull_div = (l < min_price_prev) and (curr['macd'] > df.loc[idx_min_price, 'macd']) and (curr['macd'] < 0)
-        
-        max_price_prev = p_prev_zone['high'].max()
-        idx_max_price = p_prev_zone['high'].idxmax()
-        bear_div = (h > max_price_prev) and (curr['macd'] < df.loc[idx_max_price, 'macd']) and (curr['macd'] > 0)
-        
-        if bull_div and cp < curr['vwap']:
-            tp, sl = round(curr['vwap'], 4), round(l * 0.993, 4)
-            send_telegram(f"📊 <b>ДИВЕРГЕНЦИЯ: ЛОНГ #{name} (1H)</b>\n\n📉 Цена обновила дно, но продавцы MACD выдохлись!\n☁️ Ишимоку: {cloud_status}\n🛒 Вход: <code>{round(cp, 4)}</code>\n🛡️ SL: <code>{sl}</code>\n💰 Цель (VWAP): <code>{tp}</code>")
-        elif bear_div and cp > curr['vwap']:
-            tp, sl = round(curr['vwap'], 4), round(h * 1.007, 4)
-            send_telegram(f"☄️ <b>ДИВЕРГЕНЦИЯ: ШОРТ #{name} (1H)</b>\n\n📈 Цена забросила хай, но объемы и MACD падают!\n☁️ Ишимоку: {cloud_status}\n🛒 Вход: <code>{round(cp, 4)}</code>\n🛡️ SL: <code>{sl}</code>\n💰 Цель (VWAP): <code>{tp}</code>")
             
     except Exception as e:
         print(f"Ошибка {name}: {e}")
 
 if __name__ == "__main__":
     for name, symbol in MONETS_DIV.items():
-        scan_market(name, symbol)
+        scan_market_sniper(name, symbol)
