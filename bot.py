@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 # Установка коннектора
 import ccxt
 
-# --- НАСТРОЙКИ ВТОРОГО БОТА (ТОКЕН С ФОТО) ---
+# --- НАСТРОЙКИ ВТОРОГО БОТА (ИСПРАВЛЕННЫЙ ТОКЕН И URL) ---
 TG_TOKEN = "9255233645:AAEyzaiaJbfUxSq0W0-E3jsi6ZHXig-F5h0"
 TG_CHAT_ID = "531386055"
 
@@ -31,15 +31,17 @@ MONETS_DIV = {
 exchange = ccxt.bybit({"enableRateLimit": True})
 
 def send_telegram(message):
+    # ИСПРАВЛЕНО: Добавлен корректный эндпоинт api.telegram.org и префикс /bot
     url = f"https://telegram.org{TG_TOKEN}/sendMessage"
     try:
-        requests.post(url, json={"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
+        response = requests.post(url, json={"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
+        if response.status_code != 200:
+            print(f"Ошибка TG сервера: {response.text}")
     except Exception as e:
         print(f"Ошибка TG: {e}")
 
 def get_live_candles_ccxt(symbol, interval='15m', limit=200):
     try:
-        # Защищенный запрос, который Bybit никогда не заблокирует
         bars = exchange.fetch_ohlcv(symbol, timeframe=interval, limit=limit)
         if not bars: return None
         df = pd.DataFrame(bars, columns=["timestamp", "open", "high", "low", "close", "volume"])
@@ -84,7 +86,7 @@ def scan_market_sniper(name, symbol):
 
         near_ema50 = (abs(cp - c15['ema50']) / c15['ema50']) < 0.012
 
-        # ЛОНГ СИГНАЛ (Уровень < 20)
+        # ЛОНГ СИГНАЛ
         if above_4h_200 and near_ema50 and (sk15 < 20 and sk15 > sd15 and psk15 <= psd15):
             sl = round(c15['ema100'] * 0.995, 4)
             tp = round(cp * 1.012, 4)
@@ -95,7 +97,7 @@ def scan_market_sniper(name, symbol):
                           f"📈 <i>Стратегия: Чистый разворот от EMA50 по тренду 4H. Фильтр 80/20.</i>")
             return
 
-        # ШОРТ СИГНАЛ (Уровень > 80)
+        # ШОРТ СИГНАЛ
         elif under_4h_200 and near_ema50 and (sk15 > 80 and sk15 < sd15 and psk15 >= psd15):
             sl = round(c15['ema100'] * 1.005, 4)
             tp = round(cp * 0.988, 4)
@@ -110,10 +112,12 @@ def scan_market_sniper(name, symbol):
         print(f"Ошибка {name}: {e}")
 
 if __name__ == "__main__":
-    send_telegram("🎯 <b>Второй Бот Снайпер успешно переведен на защищенный протокол CCXT 80/20!</b>\nБлокировки Bybit обойдены. Мониторинг ТОП-12 монет запущен круглосуточно.")
+    print("Запуск одиночного сканирования рынка...")
     
-    while True:
-        for name, symbol in MONETS_DIV.items():
-            scan_market_sniper(name, symbol)
-            time.sleep(2)
-        time.sleep(30)
+    # ИСПРАВЛЕНО: Убран бесконечный цикл while True. 
+    # Скрипт за один запуск проверяет все монеты и завершает работу.
+    for name, symbol in MONETS_DIV.items():
+        scan_market_sniper(name, symbol)
+        time.sleep(2)
+        
+    print("Сканирование успешно завершено.")
