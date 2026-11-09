@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 import ccxt
 
 # --- НАСТРОЙКИ ВТОРОГО БОТА (ИСПРАВЛЕННЫЙ ТОКЕН И URL) ---
-TG_TOKEN = "9255233645:AAEyzaiaJbfUxSq0W0-E3jsi6ZHXig-F5h0"
+TG_TOKEN = TG_TOKEN = "9255233645:AAEyzaiaJbfUxSq0W0-E3jsi6ZHXig-F5h0"
 TG_CHAT_ID = "531386055"
 
 # СПИСОК ПАР ДЛЯ CCXT BYBIT
