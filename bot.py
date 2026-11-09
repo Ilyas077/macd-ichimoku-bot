@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 
-# --- ОРИГИНАЛЬНЫЕ НАСТРОЙКИ ВАШЕГО ВТОРОГО БОТА ---
+# --- НАСТРОЙКИ ВАШЕГО ВТОРОГО БОТА (ТОКЕН С ФОТО) ---
 TG_TOKEN = "9255233645:AAEyzaiaJbfUxSq0W0-E3jsi6ZHXig-F5h0"
 TG_CHAT_ID = "531386055"
 
@@ -25,7 +25,6 @@ MONETS_DIV = {
 }
 
 def send_telegram(message):
-    # ФИКС 1: Исправлен системный URL Telegram API
     url = f"https://telegram.org{TG_TOKEN}/sendMessage"
     try:
         requests.post(url, json={"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
@@ -34,7 +33,6 @@ def send_telegram(message):
 
 def get_live_candles(symbol, interval, limit=300):
     bybit_map = {'4h': '240', '1h': '60', '15m': '15'}
-    # ФИКС 2: Исправлен официальный эндпоинт котировок Bybit API
     url = "https://bybit.com"
     try:
         r = requests.get(url, params={'category': 'linear', 'symbol': symbol, 'interval': bybit_map[interval], 'limit': limit}, timeout=10).json()
@@ -116,11 +114,10 @@ def scan_market_sniper(name, symbol):
         print(f"Ошибка {name}: {e}")
 
 if __name__ == "__main__":
-    send_telegram("🤖 <b>Второй Бот Снайпер (4H + 1H + 15M) успешно оживлен и запущен 24/7!</b>\nМониторинг ТОП-12 монет активен.")
+    send_telegram("🤖 <b>Второй Бот Снайпер (4H + 1H + 15M) успешно запущен на отдельный токен 24/7!</b>\nМониторинг ТОП-12 монет в этот чат активен.")
     
-    # ФИКС 3: Добавлен бесконечный цикл и плавные задержки против банов API
     while True:
         for name, symbol in MONETS_DIV.items():
             scan_market_sniper(name, symbol)
-            time.sleep(2)  # Безопасный шаг 2 секунды между монетами
+            time.sleep(2)
         time.sleep(30)
