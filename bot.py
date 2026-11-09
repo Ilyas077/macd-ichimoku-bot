@@ -69,9 +69,8 @@ def scan_market(name, symbol):
         curr = df.iloc[-1]
         cp = curr['close']
         
-        # Переменные для Пин-бара
         o, h, l, c = curr['open'], curr['high'], curr['low'], curr['close']
-        body = abs(c - o)
+        body = max(abs(c - o), 0.00001)
         full_range = h - l
         if full_range == 0: return
         
@@ -83,26 +82,26 @@ def scan_market(name, symbol):
         cloud_status = "🟢 Выше Облака" if cp > max_cloud else ("🔴 Ниже Облака" if cp < min_cloud else "🟡 Внутри Облака")
         
         # -----------------------------------------------------------------
-        # ПРОВЕРКА ПАТТЕРНА ПИН-БАР (NEW!)
+        # ОБНОВЛЕННАЯ ПРОВЕРКА ПИН-БАРА (Мягкие условия 1.5х под ночной вертолет!)
         # -----------------------------------------------------------------
-        # БЫЧИЙ ПИН-БАР (Длинная тень снизу -> Сигнал в ЛОНГ)
-        if bottom_shadow > (body * 3) and top_shadow < (full_range * 0.2):
+        # БЫЧИЙ ПИН-БАР (Тень снизу -> ЛОНГ)
+        if bottom_shadow > (body * 1.5) and top_shadow < (full_range * 0.3):
             sl = round(l * 0.995, 4)
             tp = round(curr['vwap'], 4) if cp < curr['vwap'] else round(cp * 1.02, 4)
             send_telegram(f"📌 <b>ПИН-БАР: ЛОНГ #{name} (1H)</b>\n\n"
-                          f"🔥 Крупный игрок резко выкупил падение фитилем снизу!\n"
+                          f"🔥 Зафиксирован сильный выкуп фитилем снизу!\n"
                           f"☁️ Ишимоку: {cloud_status}\n"
                           f"🛒 Вход: <code>{round(cp, 4)}</code>\n"
                           f"🛡️ Короткий SL под хвост: <code>{sl}</code>\n"
                           f"💰 Цель (VWAP/Тренд): <code>{tp}</code>")
             return
 
-        # МЕДВЕЖИЙ ПИН-БАР (Длинная тень сверху -> Сигнал в ШОРТ)
-        if top_shadow > (body * 3) and bottom_shadow < (full_range * 0.2):
+        # МЕДВЕЖИЙ ПИН-БАР (Тень сверху -> ШОРТ)
+        if top_shadow > (body * 1.5) and bottom_shadow < (full_range * 0.3):
             sl = round(h * 1.005, 4)
             tp = round(curr['vwap'], 4) if cp > curr['vwap'] else round(cp * 0.98, 4)
             send_telegram(f"📌 <b>ПИН-БАР: ШОРТ #{name} (1H)</b>\n\n"
-                          f"💥 Крупный игрок сильно придавил цену фитилем сверху!\n"
+                          f"💥 Сильное давление продавцов фитилем сверху!\n"
                           f"☁️ Ишимоку: {cloud_status}\n"
                           f"🛒 Вход: <code>{round(cp, 4)}</code>\n"
                           f"🛡️ Короткий SL над хвост: <code>{sl}</code>\n"
