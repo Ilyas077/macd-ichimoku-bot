@@ -11,7 +11,7 @@ import ccxt
 TG_TOKEN = "9105916544:AAGyQAXffLgHNGcKMjJMHH43qCvvjFLHIPw"
 TG_CHAT_ID = "531386055"
 
-# СПИСОК ПАР ДЛЯ CCXT BYBIT
+# СПИСОК ПАР ДЛЯ CCXT BYBIT (12 МОНЕТ)
 MONETS_DIV = {
     "BTC": "BTC/USDT:USDT",
     "ETH": "ETH/USDT:USDT",
@@ -114,8 +114,8 @@ def scan_market_sniper(name, symbol):
 if __name__ == "__main__":
     print("Запуск одиночного сканирования рынка...")
     
-    # ТЕСТОВЫЙ ПИНГ: Отправит сообщение сразу после сохранения для проверки связи
-    send_telegram("📡 <b>Бот-Сканер успешно запущен!</b> Проверяю 12 монет на ноут...")
+    # ИСПРАВЛЕНО: Теперь пинг прилетит прямо на твой рабочий телефон в «Мой Трейд Бот»!
+    send_telegram("📡 <b>Бот-Сканер успешно запущен!</b> Проверяю 12 монет на телефоне...")
     
     for name, symbol in MONETS_DIV.items():
         scan_market_sniper(name, symbol)
