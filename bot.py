@@ -10,7 +10,8 @@ import ccxt
 # --- НАСТРОЙКИ ВТОРОГО БОТА (ИСПРАВЛЕННЫЙ ТОКЕН И URL) ---
 TG_TOKEN = TG_TOKEN = TG_TOKEN = "9105916544:AAGyQAXffLgHNGcKMjJMHH43qCvvjFLHIPw"
 
-TG_CHAT_ID = "531386055"
+TG_CHAT_ID =  "6100656317"
+
 
 # СПИСОК ПАР ДЛЯ CCXT BYBIT
 MONETS_DIV = {
