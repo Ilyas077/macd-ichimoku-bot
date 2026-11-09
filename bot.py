@@ -4,11 +4,11 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 
-# --- НАСТРОЙКИ ВАШЕГО ВТОРОГО БОТА (ТОКЕН С ФОТО) ---
+# --- НАСТРОЙКИ ВТОРОГО БОТА (ТОКЕН С ФОТО) ---
 TG_TOKEN = "9255233645:AAEyzaiaJbfUxSq0W0-E3jsi6ZHXig-F5h0"
 TG_CHAT_ID = "531386055"
 
-# ОПТИМАЛЬНЫЙ ТОП-12 ИЗ ВАШЕГО СПИСКА ДЛЯ СТАБИЛЬНОЙ РАБОТЫ 24/7
+# ОПТИМАЛЬНЫЙ ТОП-12 ИЗ ВАШЕГО СПИСКА
 MONETS_DIV = {
     "BTC": "BTCUSDT",
     "ETH": "ETHUSDT",
@@ -88,33 +88,33 @@ def scan_market_sniper(name, symbol):
         
         sk15, sd15 = c15['stoch_k'], c15['stoch_d']
 
-        # ЛОНГ СИГНАЛ
-        if above_4h_200 and e_bull and (abs(cp - c15['ema50']) / c15['ema50'] < 0.003) and (sk15 < 40 and sk15 > sd15):
+        # ЖЕСТКИЙ ЛОНГ СИГНАЛ (Фильтр Стохастика снижен до 20 для ювелирного входа)
+        if above_4h_200 and e_bull and (abs(cp - c15['ema50']) / c15['ema50'] < 0.003) and (sk15 < 20 and sk15 > sd15):
             sl = round(c15['ema100'] * 0.995, 4)
             tp = round(cp * 1.012, 4)
-            send_telegram(f"🚀 <b>СНАЙПЕР-ЛОНГ #{name} (15М)</b>\n\n"
+            send_telegram(f"🚀 <b>СНАЙПЕР-ЛОНГ #{name} (15М) [80/20]</b>\n\n"
                           f"🛒 Вход: <code>{round(cp, 4)}</code>\n"
                           f"🛡️ Стоп-лосс (SL): <code>{sl}</code>\n"
                           f"💰 Тейк-профит (TP): <code>{tp}</code>\n\n"
-                          f"📈 <i>Стратегия: Быстрый забор импульса от EMA50 по тренду. Не пересиживать!</i>")
+                          f"📈 <i>Стратегия: Максимально глубокий отскок от EMA50. Фильтр 80/20 активен.</i>")
             return
 
-        # ШОРТ СИГНАЛ
-        elif under_4h_200 and e_bear and (abs(cp - c15['ema50']) / c15['ema50'] < 0.003) and (sk15 > 60 and sk15 < sd15):
+        # ЖЕСТКИЙ ШОРТ СИГНАЛ (Фильтр Стохастика поднят до 80 против ложных пробитий)
+        elif under_4h_200 and e_bear and (abs(cp - c15['ema50']) / c15['ema50'] < 0.003) and (sk15 > 80 and sk15 < sd15):
             sl = round(c15['ema100'] * 1.005, 4)
             tp = round(cp * 0.988, 4)
-            send_telegram(f"🔴 <b>СНАЙПЕР-ШОРТ #{name} (15М)</b>\n\n"
+            send_telegram(f"🔴 <b>СНАЙПЕР-ШОРТ #{name} (15М) [80/20]</b>\n\n"
                           f"🛒 Вход: <code>{round(cp, 4)}</code>\n"
                           f"🛡️ Стоп-лосс (SL): <code>{sl}</code>\n"
                           f"💰 Тейк-профит (TP): <code>{tp}</code>\n\n"
-                          f"📉 <i>Стратегия: Быстрый забор импульса от EMA50 по тренду. Не пересиживать!</i>")
+                          f"📉 <i>Стратегия: Максимально глубокий отбой от EMA50. Фильтр 80/20 активен.</i>")
             return
             
     except Exception as e:
         print(f"Ошибка {name}: {e}")
 
 if __name__ == "__main__":
-    send_telegram("🤖 <b>Второй Бот Снайпер (4H + 1H + 15M) успешно запущен на отдельный токен 24/7!</b>\nМониторинг ТОП-12 монет в этот чат активен.")
+    send_telegram("🎯 <b>Второй Бот Снайпер успешно переведен на ультра-строгий режим 80/20!</b>\nЛожные шумы флэта отключены. Мониторинг ТОП-12 монет запущен.")
     
     while True:
         for name, symbol in MONETS_DIV.items():
