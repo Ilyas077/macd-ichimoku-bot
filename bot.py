@@ -8,7 +8,6 @@ from datetime import datetime, timezone, timedelta
 TG_TOKEN = "9255233645:AAEyzaiaJbfUxSq0W0-E3jsi6ZHXig-F5h0"
 TG_CHAT_ID = "531386055"
 
-# ОПТИМАЛЬНЫЙ ТОП-12 ИЗ ВАШЕГО СПИСКА
 MONETS_DIV = {
     "BTC": "BTCUSDT",
     "ETH": "ETHUSDT",
@@ -50,12 +49,6 @@ def calculate_indicators(df):
     df['ema100'] = df['close'].ewm(span=100, adjust=False).mean()
     df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
     
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    denom_rsi = loss.replace(0, np.nan)
-    df['rsi'] = 100 - (100 / (1 + (gain / denom_rsi)))
-    
     low_14 = df['low'].rolling(window=14).min()
     high_14 = df['high'].rolling(window=14).max()
     denom_stoch = high_14 - low_14
@@ -69,13 +62,11 @@ def calculate_indicators(df):
 def scan_market_sniper(name, symbol):
     try:
         df_4h = calculate_indicators(get_live_candles(symbol, '4h', limit=150))
-        df_1h = calculate_indicators(get_live_candles(symbol, '1h', limit=150))
         df_15m = calculate_indicators(get_live_candles(symbol, '15m', limit=200))
         
-        if df_4h is None or df_1h is None or df_15m is None: return
+        if df_4h is None or df_15m is None: return
         
         c4h = df_4h.iloc[-1]
-        c1h = df_1h.iloc[-1]
         c15 = df_15m.iloc[-1]
         p15 = df_15m.iloc[-2]
         cp = c15['close']
@@ -83,37 +74,38 @@ def scan_market_sniper(name, symbol):
         above_4h_200 = c4h['close'] > c4h['ema200']
         under_4h_200 = c4h['close'] < c4h['ema200']
         
-        e_bull = (cp > c15['ema50']) and (c15['ema50'] > c15['ema100'] > c15['ema200'])
-        e_bear = (cp < c15['ema50']) and (c15['ema50'] < c15['ema100'] < c15['ema200'])
-        
         sk15, sd15 = c15['stoch_k'], c15['stoch_d']
+        psk15, psd15 = p15['stoch_k'], p15['stoch_d']
 
-        # ЖЕСТКИЙ ЛОНГ СИГНАЛ (Фильтр Стохастика снижен до 20 для ювелирного входа)
-        if above_4h_200 and e_bull and (abs(cp - c15['ema50']) / c15['ema50'] < 0.003) and (sk15 < 20 and sk15 > sd15):
+        near_ema50 = (abs(cp - c15['ema50']) / c15['ema50']) < 0.012
+
+        # ТОЧНЫЙ СИГНАЛ НА ЛОНГ
+        if above_4h_200 and near_ema50 and (sk15 < 20 and sk15 > sd15 and psk15 <= psd15):
             sl = round(c15['ema100'] * 0.995, 4)
             tp = round(cp * 1.012, 4)
-            send_telegram(f"🚀 <b>СНАЙПЕР-ЛОНГ #{name} (15М) [80/20]</b>\n\n"
+            send_telegram(f"🚀 <b>СНАЙПЕР-ЛОНГ #{name} (15М)</b>\n\n"
                           f"🛒 Вход: <code>{round(cp, 4)}</code>\n"
                           f"🛡️ Стоп-лосс (SL): <code>{sl}</code>\n"
                           f"💰 Тейк-профит (TP): <code>{tp}</code>\n\n"
-                          f"📈 <i>Стратегия: Максимально глубокий отскок от EMA50. Фильтр 80/20 активен.</i>")
+                          f"📈 <i>Стратегия: Чистый разворот от EMA50 по тренду 4H. Фильтр 80/20.</i>")
             return
 
-        # ЖЕСТКИЙ ШОРТ СИГНАЛ (Фильтр Стохастика поднят до 80 против ложных пробитий)
-        elif under_4h_200 and e_bear and (abs(cp - c15['ema50']) / c15['ema50'] < 0.003) and (sk15 > 80 and sk15 < sd15):
+        # ТОЧНЫЙ СИГНАЛ НА ШОРТ
+        elif under_4h_200 and near_ema50 and (sk15 > 80 and sk15 < sd15 and psk15 >= psd15):
             sl = round(c15['ema100'] * 1.005, 4)
             tp = round(cp * 0.988, 4)
-            send_telegram(f"🔴 <b>СНАЙПЕР-ШОРТ #{name} (15М) [80/20]</b>\n\n"
+            send_telegram(f"🔴 <b>СНАЙПЕР-ШОРТ #{name} (15М)</b>\n\n"
                           f"🛒 Вход: <code>{round(cp, 4)}</code>\n"
                           f"🛡️ Стоп-лосс (SL): <code>{sl}</code>\n"
                           f"💰 Тейк-профит (TP): <code>{tp}</code>\n\n"
-                          f"📉 <i>Стратегия: Максимально глубокий отбой от EMA50. Фильтр 80/20 активен.</i>")
+                          f"📉 <i>Стратегия: Чистый отбой от EMA50 по тренду 4H. Фильтр 80/20.</i>")
             return
             
     except Exception as e:
         print(f"Ошибка {name}: {e}")
 
 if __name__ == "__main__":
+    # Фикс отступов завершен, теперь это сообщение прилетит железно
     send_telegram("🎯 <b>Второй Бот Снайпер успешно переведен на ультра-строгий режим 80/20!</b>\nЛожные шумы флэта отключены. Мониторинг ТОП-12 монет запущен.")
     
     while True:
