@@ -22,4 +22,5 @@ jobs:
           pip install ccxt pandas numpy requests
 
       - name: Запуск сканера
-        run: python main.py
+        run: run: python bot.py
+
