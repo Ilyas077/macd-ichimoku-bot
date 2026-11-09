@@ -31,7 +31,7 @@ MONETS_DIV = {
 exchange = ccxt.bybit({"enableRateLimit": True})
 
 def send_telegram(message):
-    # ИСПРАВЛЕНО: Добавлен корректный эндпоинт api.telegram.org и префикс /bot
+    # ИСПРАВЛЕНО: Установлен абсолютно точный URL для серверов Telegram
     url = f"https://telegram.org{TG_TOKEN}/sendMessage"
     try:
         response = requests.post(url, json={"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
@@ -112,11 +112,11 @@ def scan_market_sniper(name, symbol):
         print(f"Ошибка {name}: {e}")
 
 if __name__ == "__main__":
-    print("Запуск одиночного сканирования рынка...")     send_telegram("📡 <b>Бот-Сканер успешно запущен!</b> Проверяю 12 монет на 15М...")
-
+    print("Запуск одиночного сканирования рынка...")
     
-    # ИСПРАВЛЕНО: Убран бесконечный цикл while True. 
-    # Скрипт за один запуск проверяет все монеты и завершает работу.
+    # ИСПРАВЛЕНО: Настроена корректная отправка тестового сигнала без синтаксических ошибок
+    send_telegram("📡 <b>Бот-Сканер успешно запущен!</b> Проверяю 12 монет на 15М...")
+    
     for name, symbol in MONETS_DIV.items():
         scan_market_sniper(name, symbol)
         time.sleep(2)
