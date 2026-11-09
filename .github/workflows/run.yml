@@ -1,16 +1,25 @@
-name: MACD Ichimoku Scanner 24/7
+name: MACD Сканер Ишимоку 24/7
+
 on:
+  workflow_dispatch: # Оставляет возможность запускать вручную
   schedule:
-    - cron: '*/10 * * * *'
-  workflow_dispatch:
+    - cron: '*/5 * * * *' # ИДЕАЛЬНО: Автозапуск каждые 5 минут круглые сутки
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Проверка репозитория
+        uses: actions/checkout@v4
+
+      - name: Настройка Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - run: pip install pandas numpy requests ccxt
-      - run: python bot.py
+          python-python: '3.10'
+
+      - name: Установка библиотек
+        run: |
+          pip install ccxt pandas numpy requests
+
+      - name: Запуск сканера
+        run: python main.py
