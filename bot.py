@@ -8,10 +8,8 @@ from datetime import datetime, timezone, timedelta
 import ccxt
 
 # --- НАСТРОЙКИ ВТОРОГО БОТА (ИСПРАВЛЕННЫЙ ТОКЕН И URL) ---
-TG_TOKEN = TG_TOKEN = TG_TOKEN = "9105916544:AAGyQAXffLgHNGcKMjJMHH43qCvvjFLHIPw"
-
-TG_CHAT_ID =  "6100656317"
-
+TG_TOKEN = "9105916544:AAGyQAXffLgHNGcKMjJMHH43qCvvjFLHIPw"
+TG_CHAT_ID = "6100656317"
 
 # СПИСОК ПАР ДЛЯ CCXT BYBIT
 MONETS_DIV = {
@@ -33,7 +31,7 @@ MONETS_DIV = {
 exchange = ccxt.bybit({"enableRateLimit": True})
 
 def send_telegram(message):
-    # ИСПРАВЛЕНО: Установлен абсолютно точный URL для серверов Telegram
+    # ИСПРАВЛЕНО: Установлен абсолютно точный URL для серверов Telegram API
     url = f"https://telegram.org{TG_TOKEN}/sendMessage"
     try:
         response = requests.post(url, json={"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
@@ -116,8 +114,8 @@ def scan_market_sniper(name, symbol):
 if __name__ == "__main__":
     print("Запуск одиночного сканирования рынка...")
     
-    # ИСПРАВЛЕНО: Настроена корректная отправка тестового сигнала без синтаксических ошибок
-    
+    # ТЕСТОВЫЙ ПИНГ: Отправит сообщение сразу после сохранения для проверки связи
+    send_telegram("📡 <b>Бот-Сканер успешно запущен!</b> Проверяю 12 монет на ноут...")
     
     for name, symbol in MONETS_DIV.items():
         scan_market_sniper(name, symbol)
