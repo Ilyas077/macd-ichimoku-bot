@@ -8,7 +8,6 @@ import pandas as pd
 
 # --- 1. НАСТРОЙКИ ---
 TG_TOKEN = "9255233645:AAEyzaiaJbfUxSq0W0-E3jsi6zHXig-F5h0"
-
 TG_CHAT_ID = "531386055"
 
 SYMBOLS = [
@@ -25,9 +24,11 @@ HEADERS = {
 CB_BASE = base64.b64decode("aHR0cHM6Ly9hcGkuZXhjaGFuZ2UuY29pbmJhc2UuY29tL3Byb2R1Y3RzLw==").decode()
 BV_URL = base64.b64decode("aHR0cHM6Ly9kYXRhLWFwaS5iaW5hbmNlLnZpc2lvbi9hcGkvdjMva2xpbmVz").decode()
 
-# --- 2. ОТПРАВКА В TELEGRAM ---
+# --- 2. ОТПРАВКА В TELEGRAM (ЗАЩИЩЕННЫЙ URL) ---
+TG_API_BASE = base64.b64decode("aHR0cHM6Ly9hcGkudGVsZWdyYW0ub3JnL2JvdA==").decode()
+
 def send_telegram(message):
-    url = f"https://telegram.org{TG_TOKEN}/sendMessage"
+    url = f"{TG_API_BASE}{TG_TOKEN}/sendMessage"
     try:
         r = requests.post(url, json={"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
         if r.status_code != 200:
@@ -71,14 +72,12 @@ def get_1h_candles(symbol, limit=150):
 
 # --- 4. РАСЧЕТ MACD И ОБЛАКА ИШИМОКУ ---
 def add_ichimoku_macd(df):
-    # Классический MACD (12, 26, 9)
     ema12 = df['close'].ewm(span=12, adjust=False).mean()
     ema26 = df['close'].ewm(span=26, adjust=False).mean()
     df['macd'] = ema12 - ema26
     df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
     df['macd_hist'] = df['macd'] - df['macd_signal']
 
-    # Облако Ишимоку (9, 26, 52)
     high_9 = df['high'].rolling(window=9).max()
     low_9 = df['low'].rolling(window=9).min()
     tenkan_sen = (high_9 + low_9) / 2
@@ -87,14 +86,12 @@ def add_ichimoku_macd(df):
     low_26 = df['low'].rolling(window=26).min()
     kijun_sen = (high_26 + low_26) / 2
 
-    # Сдвиг на 26 свечей вперед для формирования текущего облака над ценой
     df['senkou_a'] = ((tenkan_sen + kijun_sen) / 2).shift(26)
     
     high_52 = df['high'].rolling(window=52).max()
     low_52 = df['low'].rolling(window=52).min()
     df['senkou_b'] = ((high_52 + low_52) / 2).shift(26)
 
-    # Будущее облако (без сдвига) для оценки силы тренда
     df['future_a'] = (tenkan_sen + kijun_sen) / 2
     df['future_b'] = (high_52 + low_52) / 2
 
@@ -108,23 +105,19 @@ def check_coin(symbol):
 
     df = add_ichimoku_macd(df)
     
-    # Берем последнюю ЗАКРЫТУЮ часовую свечу (-2) и предыдущую (-3)
     curr = df.iloc[-2]
     prev = df.iloc[-3]
     price = curr['close']
 
-    # Границы Облака Ишимоку на текущей свече
     cloud_top = max(curr['senkou_a'], curr['senkou_b'])
     cloud_bottom = min(curr['senkou_a'], curr['senkou_b'])
 
-    # Проверка пересечения MACD
     macd_bull_cross = (prev['macd'] <= prev['macd_signal']) and (curr['macd'] > curr['macd_signal'])
     macd_bear_cross = (prev['macd'] >= prev['macd_signal']) and (curr['macd'] < curr['macd_signal'])
 
-    # УСЛОВИЕ ЛОНГА: Цена выше облака + будущее облако бычье + пересечение MACD вверх
     if price > cloud_top and curr['future_a'] > curr['future_b'] and macd_bull_cross:
-        sl = round(price * 0.988, 4)  # Стоп -1.2%
-        tp = round(price * 1.025, 4)  # Тейк +2.5%
+        sl = round(price * 0.988, 4)
+        tp = round(price * 1.025, 4)
         return (
             f"☁️🟢 <b>ИШИМОКУ + MACD ЛОНГ (1H)</b>\n\n"
             f"🪙 Монета: <b>#{symbol}</b>\n"
@@ -134,10 +127,9 @@ def check_coin(symbol):
             f"📊 <i>Цена пробила/удержала верх Облака Ишимоку, MACD развернулся вверх.</i>"
         )
 
-    # УСЛОВИЕ ШОРТА: Цена ниже облака + будущее облако медвежье + пересечение MACD вниз
     if price < cloud_bottom and curr['future_a'] < curr['future_b'] and macd_bear_cross:
-        sl = round(price * 1.012, 4)  # Стоп +1.2%
-        tp = round(price * 0.975, 4)  # Тейк -2.5%
+        sl = round(price * 1.012, 4)
+        tp = round(price * 0.975, 4)
         return (
             f"☁️🔴 <b>ИШИМОКУ + MACD ШОРТ (1H)</b>\n\n"
             f"🪙 Монета: <b>#{symbol}</b>\n"
