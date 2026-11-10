@@ -1,124 +1,171 @@
+import os
 import time
+import base64
+import datetime
 import requests
 import numpy as np
 import pandas as pd
-from datetime import datetime, timezone, timedelta
 
-# Установка коннектора
-import ccxt
+# --- 1. НАСТРОЙКИ ---
+TG_TOKEN = "9255233645:AAEyzaiaJbfUxSq0W0-E3jsi6zHXig-F5h0"
 
-# --- НАСТРОЙКИ ВТОРОГО БОТА (ИСПРАВЛЕННЫЙ ТОКЕН И URL) ---
-TG_TOKEN = "9105916544:AAGyQAXffLgHNGcKMjJMHH43qCvvjFLHIPw"
 TG_CHAT_ID = "531386055"
 
-# СПИСОК ПАР ДЛЯ CCXT BYBIT (12 МОНЕТ)
-MONETS_DIV = {
-    "BTC": "BTC/USDT:USDT",
-    "ETH": "ETH/USDT:USDT",
-    "SOL": "SOL/USDT:USDT",
-    "INJ": "INJ/USDT:USDT",
-    "SUI": "SUI/USDT:USDT",
-    "XRP": "XRP/USDT:USDT",
-    "AVAX": "AVAX/USDT:USDT",
-    "TAO": "TAO/USDT:USDT",
-    "HYPE": "HYPE/USDT:USDT",
-    "ENA": "ENA/USDT:USDT",
-    "JTO": "JTO/USDT:USDT",
-    "AAVE": "AAVE/USDT:USDT"
+SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "INJUSDT", 
+    "SUIUSDT", "XRPUSDT", "AVAXUSDT", "TAOUSDT", 
+    "HYPEUSDT", "ENAUSDT", "JTOUSDT", "AAVEUSDT"
+]
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "application/json"
 }
 
-# Подключение к бирже Bybit через официальное API
-exchange = ccxt.bybit({"enableRateLimit": True})
+CB_BASE = base64.b64decode("aHR0cHM6Ly9hcGkuZXhjaGFuZ2UuY29pbmJhc2UuY29tL3Byb2R1Y3RzLw==").decode()
+BV_URL = base64.b64decode("aHR0cHM6Ly9kYXRhLWFwaS5iaW5hbmNlLnZpc2lvbi9hcGkvdjMva2xpbmVz").decode()
 
+# --- 2. ОТПРАВКА В TELEGRAM ---
 def send_telegram(message):
-    # ИСПРАВЛЕНО: Установлен абсолютно точный URL для серверов Telegram API
     url = f"https://telegram.org{TG_TOKEN}/sendMessage"
     try:
-        response = requests.post(url, json={"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
-        if response.status_code != 200:
-            print(f"Ошибка TG сервера: {response.text}")
+        r = requests.post(url, json={"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
+        if r.status_code != 200:
+            print(f"Ошибка Telegram API: {r.text}")
     except Exception as e:
-        print(f"Ошибка TG: {e}")
+        print(f"Сбой отправки в Telegram: {e}")
 
-def get_live_candles_ccxt(symbol, interval='15m', limit=200):
+# --- 3. ПОЛУЧЕНИЕ ЧАСОВЫХ СВЕЧЕЙ (1H) ---
+def get_1h_candles(symbol, limit=150):
+    coin = symbol.replace("USDT", "")
+    
+    # Канал 1: Coinbase
+    url_cb = f"{CB_BASE}{coin}-USD/candles"
     try:
-        bars = exchange.fetch_ohlcv(symbol, timeframe=interval, limit=limit)
-        if not bars: return None
-        df = pd.DataFrame(bars, columns=["timestamp", "open", "high", "low", "close", "volume"])
-        for c in ["open", "high", "low", "close"]: df[c] = df[c].astype(float)
-        return df
+        r = requests.get(url_cb, params={"granularity": 3600}, headers=HEADERS, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, list) and len(data) > 60:
+                df = pd.DataFrame(data[:limit], columns=['timestamp', 'low', 'high', 'open', 'close', 'volume'])
+                df = df.iloc[::-1].reset_index(drop=True)
+                for col in ['open', 'high', 'low', 'close']:
+                    df[col] = df[col].astype(float)
+                return df
     except Exception:
-        return None
+        pass
 
-def calculate_indicators(df):
-    if df is None or df.empty: return None
-    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-    df['ema100'] = df['close'].ewm(span=100, adjust=False).mean()
-    df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
+    # Канал 2: Зеркало Binance Vision
+    try:
+        r_bv = requests.get(BV_URL, params={"symbol": symbol, "interval": "1h", "limit": limit}, headers=HEADERS, timeout=10)
+        if r_bv.status_code == 200:
+            data_bv = r_bv.json()
+            if isinstance(data_bv, list) and len(data_bv) > 60:
+                df = pd.DataFrame([row[:6] for row in data_bv], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                for col in ['open', 'high', 'low', 'close']:
+                    df[col] = df[col].astype(float)
+                return df
+    except Exception:
+        pass
+
+    return None
+
+# --- 4. РАСЧЕТ MACD И ОБЛАКА ИШИМОКУ ---
+def add_ichimoku_macd(df):
+    # Классический MACD (12, 26, 9)
+    ema12 = df['close'].ewm(span=12, adjust=False).mean()
+    ema26 = df['close'].ewm(span=26, adjust=False).mean()
+    df['macd'] = ema12 - ema26
+    df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+    df['macd_hist'] = df['macd'] - df['macd_signal']
+
+    # Облако Ишимоку (9, 26, 52)
+    high_9 = df['high'].rolling(window=9).max()
+    low_9 = df['low'].rolling(window=9).min()
+    tenkan_sen = (high_9 + low_9) / 2
+
+    high_26 = df['high'].rolling(window=26).max()
+    low_26 = df['low'].rolling(window=26).min()
+    kijun_sen = (high_26 + low_26) / 2
+
+    # Сдвиг на 26 свечей вперед для формирования текущего облака над ценой
+    df['senkou_a'] = ((tenkan_sen + kijun_sen) / 2).shift(26)
     
-    low_14 = df['low'].rolling(window=14).min()
-    high_14 = df['high'].rolling(window=14).max()
-    denom_stoch = high_14 - low_14
-    denom_stoch = denom_stoch.replace(0, np.nan)
-    
-    fast_k = 100 * (df['close'] - low_14) / denom_stoch
-    df['stoch_k'] = fast_k.rolling(window=3).mean()
-    df['stoch_d'] = df['stoch_k'].rolling(window=3).mean()
+    high_52 = df['high'].rolling(window=52).max()
+    low_52 = df['low'].rolling(window=52).min()
+    df['senkou_b'] = ((high_52 + low_52) / 2).shift(26)
+
+    # Будущее облако (без сдвига) для оценки силы тренда
+    df['future_a'] = (tenkan_sen + kijun_sen) / 2
+    df['future_b'] = (high_52 + low_52) / 2
+
     return df
 
-def scan_market_sniper(name, symbol):
-    try:
-        df_4h = calculate_indicators(get_live_candles_ccxt(symbol, '4h', limit=150))
-        df_15m = calculate_indicators(get_live_candles_ccxt(symbol, '15m', limit=150))
-        
-        if df_4h is None or df_15m is None: return
-        
-        c4h = df_4h.iloc[-1]
-        c15 = df_15m.iloc[-1]
-        p15 = df_15m.iloc[-2]
-        cp = c15['close']
-        
-        above_4h_200 = c4h['close'] > c4h['ema200']
-        under_4h_200 = c4h['close'] < c4h['ema200']
-        
-        sk15, sd15 = c15['stoch_k'], c15['stoch_d']
-        psk15, psd15 = p15['stoch_k'], p15['stoch_d']
+# --- 5. ПОИСК СИГНАЛОВ ---
+def check_coin(symbol):
+    df = get_1h_candles(symbol, limit=150)
+    if df is None or len(df) < 80:
+        return None
 
-        near_ema50 = (abs(cp - c15['ema50']) / c15['ema50']) < 0.012
+    df = add_ichimoku_macd(df)
+    
+    # Берем последнюю ЗАКРЫТУЮ часовую свечу (-2) и предыдущую (-3)
+    curr = df.iloc[-2]
+    prev = df.iloc[-3]
+    price = curr['close']
 
-        # ЛОНГ СИГНАЛ
-        if above_4h_200 and near_ema50 and (sk15 < 20 and sk15 > sd15 and psk15 <= psd15):
-            sl = round(c15['ema100'] * 0.995, 4)
-            tp = round(cp * 1.012, 4)
-            send_telegram(f"🚀 <b>СНАЙПЕР-ЛОНГ #{name} (15М)</b>\n\n"
-                          f"🛒 Вход: <code>{round(cp, 4)}</code>\n"
-                          f"🛡️ Стоп-лосс (SL): <code>{sl}</code>\n"
-                          f"💰 Тейк-профит (TP): <code>{tp}</code>\n\n"
-                          f"📈 <i>Стратегия: Чистый разворот от EMA50 по тренду 4H. Фильтр 80/20.</i>")
-            return
+    # Границы Облака Ишимоку на текущей свече
+    cloud_top = max(curr['senkou_a'], curr['senkou_b'])
+    cloud_bottom = min(curr['senkou_a'], curr['senkou_b'])
 
-        # ШОРТ СИГНАЛ
-        elif under_4h_200 and near_ema50 and (sk15 > 80 and sk15 < sd15 and psk15 >= psd15):
-            sl = round(c15['ema100'] * 1.005, 4)
-            tp = round(cp * 0.988, 4)
-            send_telegram(f"🔴 <b>СНАЙПЕР-ШОРТ #{name} (15М)</b>\n\n"
-                          f"🛒 Вход: <code>{round(cp, 4)}</code>\n"
-                          f"🛡️ Стоп-лосс (SL): <code>{sl}</code>\n"
-                          f"💰 Тейк-профит (TP): <code>{tp}</code>\n\n"
-                          f"📈 <i>Стратегия: Чистый отбой от EMA50 по тренду 4H. Фильтр 80/20.</i>")
-            return
-            
-    except Exception as e:
-        print(f"Ошибка {name}: {e}")
+    # Проверка пересечения MACD
+    macd_bull_cross = (prev['macd'] <= prev['macd_signal']) and (curr['macd'] > curr['macd_signal'])
+    macd_bear_cross = (prev['macd'] >= prev['macd_signal']) and (curr['macd'] < curr['macd_signal'])
 
+    # УСЛОВИЕ ЛОНГА: Цена выше облака + будущее облако бычье + пересечение MACD вверх
+    if price > cloud_top and curr['future_a'] > curr['future_b'] and macd_bull_cross:
+        sl = round(price * 0.988, 4)  # Стоп -1.2%
+        tp = round(price * 1.025, 4)  # Тейк +2.5%
+        return (
+            f"☁️🟢 <b>ИШИМОКУ + MACD ЛОНГ (1H)</b>\n\n"
+            f"🪙 Монета: <b>#{symbol}</b>\n"
+            f"💵 Вход: <code>{round(price, 4)}</code>\n"
+            f"🛡️ Стоп (-1.2%): <code>{sl}</code>\n"
+            f"💰 Тейк (+2.5%): <code>{tp}</code>\n\n"
+            f"📊 <i>Цена пробила/удержала верх Облака Ишимоку, MACD развернулся вверх.</i>"
+        )
+
+    # УСЛОВИЕ ШОРТА: Цена ниже облака + будущее облако медвежье + пересечение MACD вниз
+    if price < cloud_bottom and curr['future_a'] < curr['future_b'] and macd_bear_cross:
+        sl = round(price * 1.012, 4)  # Стоп +1.2%
+        tp = round(price * 0.975, 4)  # Тейк -2.5%
+        return (
+            f"☁️🔴 <b>ИШИМОКУ + MACD ШОРТ (1H)</b>\n\n"
+            f"🪙 Монета: <b>#{symbol}</b>\n"
+            f"💵 Вход: <code>{round(price, 4)}</code>\n"
+            f"🛡️ Стоп (+1.2%): <code>{sl}</code>\n"
+            f"💰 Тейк (-2.5%): <code>{tp}</code>\n\n"
+            f"📊 <i>Цена под Облаком Ишимоку, MACD развернулся вниз.</i>"
+        )
+
+    return None
+
+# --- 6. ЗАПУСК ---
 if __name__ == "__main__":
-    print("Запуск одиночного сканирования рынка...")
+    print("Запуск сканера Ишимоку + MACD (1H)...")
+    is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
     
-    # ИСПРАВЛЕНО: Теперь пинг прилетит прямо на твой рабочий телефон в «Мой Трейд Бот»!
-    send_telegram("📡 <b>Бот-Сканер успешно запущен!</b> Проверяю 12 монет на телефоне...")
+    if is_manual:
+        send_telegram("☁️ <b>Бот Ишимоку + MACD (1H) запущен!</b> Проверяю 12 монет...")
+
+    found = 0
+    for symbol in SYMBOLS:
+        signal_msg = check_coin(symbol)
+        if signal_msg:
+            send_telegram(signal_msg)
+            found += 1
+        time.sleep(1)
+
+    if is_manual and found == 0:
+        send_telegram("☁️ Проверка Ишимоку + MACD завершена. На закрытии текущего часа сильных трендовых сигналов нет.")
     
-    for name, symbol in MONETS_DIV.items():
-        scan_market_sniper(name, symbol)
-        time.sleep(2)
-        
-    print("Сканирование успешно завершено.")
+    print(f"Готово. Найдено сигналов: {found}")
