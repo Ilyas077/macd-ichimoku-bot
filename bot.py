@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 # --- 1. НАСТРОЙКИ ---
-TG_TOKEN = "9255233645:AAEyzaiaJbfUxSq0W0-E3jsi6zHXig-F5h0"
+TG_TOKEN = "9255233645:AAFk5WNpiMgyRS50hKj1QE6xrNUMKDrr2vo"
 TG_CHAT_ID = "531386055"
 
 SYMBOLS = [
