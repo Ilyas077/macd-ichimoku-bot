@@ -3,7 +3,6 @@ import time
 import base64
 import datetime
 import requests
-import numpy as np
 import pandas as pd
 
 # --- 1. НАСТРОЙКИ ---
@@ -40,6 +39,7 @@ def send_telegram(message):
 
 # --- 3. ПОЛУЧЕНИЕ СВЕЧЕЙ (1h, 4h, 1d) ---
 def get_candles(symbol, timeframe="1h", limit=150):
+    # Канал 1: Binance Vision
     try:
         r_bv = requests.get(BV_URL, params={"symbol": symbol, "interval": timeframe, "limit": limit}, headers=HEADERS, timeout=10)
         if r_bv.status_code == 200:
@@ -49,9 +49,10 @@ def get_candles(symbol, timeframe="1h", limit=150):
                 for col in ['open', 'high', 'low', 'close']:
                     df[col] = df[col].astype(float)
                 return df
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"BV error {symbol}: {e}")
 
+    # Канал 2: Coinbase
     coin = symbol.replace("USDT", "")
     url_cb = f"{CB_BASE}{coin}-USD/candles"
     try:
@@ -60,7 +61,7 @@ def get_candles(symbol, timeframe="1h", limit=150):
             r = requests.get(url_cb, params={"granularity": 3600}, headers=HEADERS, timeout=10)
             if r.status_code == 200:
                 data = r.json()
-                if isinstance(data, list) and len(data) >= 20:
+                if isinstance(data, list) and len(data) >= 15:
                     df = pd.DataFrame(data[:req_limit], columns=['timestamp', 'low', 'high', 'open', 'close', 'volume'])
                     df = df.iloc[::-1].reset_index(drop=True)
                     for col in ['open', 'high', 'low', 'close']:
@@ -84,8 +85,8 @@ def get_candles(symbol, timeframe="1h", limit=150):
                     for col in ['open', 'high', 'low', 'close']:
                         df[col] = df[col].astype(float)
                     return df
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"CB error {symbol}: {e}")
 
     return None
 
@@ -94,7 +95,7 @@ def get_liquidity_pools(symbol):
     df_1h = get_candles(symbol, timeframe="1h", limit=40)
     df_1d = get_candles(symbol, timeframe="1d", limit=12)
 
-    if df_1h is None or len(df_1h) < 28 or df_1d is None or len(df_1d) < 9:
+    if df_1h is None or len(df_1h) < 26 or df_1d is None or len(df_1d) < 8:
         return None
 
     price = df_1h.iloc[-1]['close']
@@ -104,7 +105,6 @@ def get_liquidity_pools(symbol):
     day_high = day_window['high'].max()
     day_low = day_window['low'].min()
 
-    # Снятие суточной ликвидности за последние 2 часа
     recent_2h_high = df_1h.iloc[-2:]['high'].max()
     recent_2h_low = df_1h.iloc[-2:]['low'].min()
     day_top_swept = recent_2h_high >= day_high
@@ -115,19 +115,16 @@ def get_liquidity_pools(symbol):
     week_high = week_window['high'].max()
     week_low = week_window['low'].min()
 
-    # Снятие недельной ликвидности за сегодня
     today_high = df_1d.iloc[-1]['high']
     today_low = df_1d.iloc[-1]['low']
     week_top_swept = today_high >= week_high
     week_bot_swept = today_low <= week_low
 
-    # Расчет расстояний в процентах
     d_up_pct = round(((day_high - price) / price) * 100, 2)
     d_down_pct = round(((price - day_low) / price) * 100, 2)
     w_up_pct = round(((week_high - price) / price) * 100, 2)
     w_down_pct = round(((price - week_low) / price) * 100, 2)
 
-    # Приоритет движения к неснятым стопам
     if day_top_swept and not day_bot_swept:
         priority = "SHORT"
         advice = f"⬆️ Суточный верх СНЯТ ({round(day_high, 4)}). Выгоднее идти ВНИЗ к суточному дну {round(day_low, 4)} (-{d_down_pct}%)."
@@ -153,7 +150,7 @@ def get_liquidity_pools(symbol):
         "advice": advice
     }
 
-# --- 5. ПРОВЕРКА СИГНАЛОВ ПО EMA 50/100 (1H И 4H) И ЛИКВИДНОСТИ ---
+# --- 5. ПРОВЕРКА СИГНАЛОВ ПО EMA 50/100 (1H И 4H) ---
 def check_signals(symbol, liq, timeframe="1h"):
     df = get_candles(symbol, timeframe=timeframe, limit=130)
     if df is None or len(df) < 105:
@@ -168,10 +165,8 @@ def check_signals(symbol, liq, timeframe="1h"):
 
     ema_bull_cross = (prev['ema50'] <= prev['ema100']) and (curr['ema50'] > curr['ema100'])
     ema_bear_cross = (prev['ema50'] >= prev['ema100']) and (curr['ema50'] < curr['ema100'])
-
     tf_label = timeframe.upper()
 
-    # 1. ПЕРЕСЕЧЕНИЕ EMA 50/100 В СТОРОНУ БЛИЖАЙШЕЙ ЛИКВИДНОСТИ
     if ema_bull_cross and liq['priority'] == "LONG":
         tp = round(liq['day_high'], 4) if liq['d_up_pct'] >= 1.0 else round(liq['week_high'], 4)
         sl = round(min(curr['ema100'], liq['day_low']) * 0.995, 4)
@@ -198,7 +193,6 @@ def check_signals(symbol, liq, timeframe="1h"):
             f"📅 Неделя (7D): Верх {round(liq['week_high'], 4)} (+{liq['w_up_pct']}%) | Низ {round(liq['week_low'], 4)} (-{liq['w_down_pct']}%)"
         )
 
-    # 2. СНЯТИЕ НЕДЕЛЬНОЙ ЛИКВИДНОСТИ + ТРЕНД ПО EMA 50/100
     if liq['week_bot_swept'] and curr['ema50'] > curr['ema100'] and curr['close'] > liq['week_low']:
         return (
             f"🌊🟢 <b>СНЯТ МИНИМУМ НЕДЕЛИ + EMA ({tf_label}) — ЛОНГ</b>\n\n"
@@ -223,3 +217,10 @@ def check_signals(symbol, liq, timeframe="1h"):
 if __name__ == "__main__":
     kz_tz = datetime.timezone(datetime.timedelta(hours=5))
     now_kz = datetime.datetime.now(kz_tz)
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    
+    time_str = now_kz.strftime("%d.%m.%Y %H:%M")
+    current_hour_utc = now_utc.hour
+    is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+
+    signals = []
