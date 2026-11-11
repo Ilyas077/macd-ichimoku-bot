@@ -27,19 +27,18 @@ TG_API_BASE = base64.b64decode("aHR0cHM6Ly9hcGkudGVsZWdyYW0ub3JnL2JvdA==").decod
 # --- 2. ОТПРАВКА В TELEGRAM ---
 def send_telegram(message):
     if not TG_TOKEN:
-        print("Ошибка: TG_TOKEN не найден в Secrets!")
+        print("ОШИБКА: TG_TOKEN пустой!")
         return
-    url = f"{TG_API_BASE}{TG_TOKEN}/sendMessage"
+    token_clean = TG_TOKEN.strip()
+    url = f"{TG_API_BASE}{token_clean}/sendMessage"
     try:
         r = requests.post(url, json={"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
-        if r.status_code != 200:
-            print(f"Ошибка Telegram API: {r.text}")
+        print(f"СТАТУС ТЕЛЕГРАМ: {r.status_code} | ОТВЕТ: {r.text}")
     except Exception as e:
-        print(f"Сбой отправки: {e}")
+        print(f"СБОЙ СЕТИ: {e}")
 
 # --- 3. ПОЛУЧЕНИЕ СВЕЧЕЙ (1h, 4h, 1d) ---
 def get_candles(symbol, timeframe="1h", limit=150):
-    # Канал 1: Binance Vision
     try:
         r_bv = requests.get(BV_URL, params={"symbol": symbol, "interval": timeframe, "limit": limit}, headers=HEADERS, timeout=10)
         if r_bv.status_code == 200:
@@ -52,7 +51,6 @@ def get_candles(symbol, timeframe="1h", limit=150):
     except Exception as e:
         print(f"BV error {symbol}: {e}")
 
-    # Канал 2: Coinbase
     coin = symbol.replace("USDT", "")
     url_cb = f"{CB_BASE}{coin}-USD/candles"
     try:
@@ -224,3 +222,6 @@ if __name__ == "__main__":
     is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
 
     signals = []
+    radar_lines = []
+
+    for symbol in SYMBOLS:
