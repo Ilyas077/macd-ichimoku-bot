@@ -107,30 +107,27 @@ def get_liquidity_pools(symbol):
     week_top_swept = df_1d.iloc[-1]['high'] >= week_high
     week_bot_swept = df_1d.iloc[-1]['low'] <= week_low
 
-    d_up_pct = round(((day_high - price) / price) * 100, 2)
-    d_down_pct = round(((price - day_low) / price) * 100, 2)
-    w_up_pct = round(((week_high - price) / price) * 100, 2)
-    w_down_pct = round(((price - week_low) / price) * 100, 2)
+    d_up_pct = ((day_high - price) / price) * 100
+    d_down_pct = ((price - day_low) / price) * 100
 
     if day_top_swept and not day_bot_swept:
         priority = "SHORT"
-        advice = f"⬆️ Суточный верх СНЯТ ({round(day_high, 4)}). Выгоднее идти ВНИЗ к {round(day_low, 4)} (-{d_down_pct}%)."
+        advice = f"⬆️ Суточный верх СНЯТ ({round(day_high, 4)}). Выгоднее идти ВНИЗ к {round(day_low, 4)}."
     elif day_bot_swept and not day_top_swept:
         priority = "LONG"
-        advice = f"⬇️ Суточный низ СНЯТ ({round(day_low, 4)}). Выгоднее идти ВВЕРХ к {round(day_high, 4)} (+{d_up_pct}%)."
+        advice = f"⬇️ Суточный низ СНЯТ ({round(day_low, 4)}). Выгоднее идти ВВЕРХ к {round(day_high, 4)}."
     elif abs(d_down_pct) < abs(d_up_pct):
         priority = "SHORT"
-        advice = f"🧲 Ближе суточный НИЗ: идти <b>-{d_down_pct}%</b> до {round(day_low, 4)} (до верха +{d_up_pct}%)."
+        advice = f"🧲 Ближе суточный НИЗ: уровень <b>{round(day_low, 4)}</b> (верх {round(day_high, 4)})."
     else:
         priority = "LONG"
-        advice = f"🧲 Ближе суточный ВЕРХ: идти <b>+{d_up_pct}%</b> до {round(day_high, 4)} (до низа -{d_down_pct}%)."
+        advice = f"🧲 Ближе суточный ВЕРХ: уровень <b>{round(day_high, 4)}</b> (низ {round(day_low, 4)})."
 
     return {
         "price": price, "day_high": day_high, "day_low": day_low,
         "d_up_pct": d_up_pct, "d_down_pct": d_down_pct,
         "day_top_swept": day_top_swept, "day_bot_swept": day_bot_swept,
         "week_high": week_high, "week_low": week_low,
-        "w_up_pct": w_up_pct, "w_down_pct": w_down_pct,
         "week_top_swept": week_top_swept, "week_bot_swept": week_bot_swept,
         "priority": priority, "advice": advice
     }
@@ -155,18 +152,18 @@ def check_signals(symbol, liq, timeframe="1h"):
     if ema_bull and liq['priority'] == "LONG":
         tp = round(liq['day_high'], 4) if liq['d_up_pct'] >= 1.0 else round(liq['week_high'], 4)
         sl = round(min(curr['ema100'], liq['day_low']) * 0.995, 4)
-        return f"⚡🟢 <b>EMA 50/100 ({tf}) + ЛИКВИДНОСТЬ — ЛОНГ</b>\n\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(price, 4)}</code>\n🎯 Цель: <code>{tp}</code>\n🛡️ Стоп: <code>{sl}</code>\n\n📊 {liq['advice']}\n📅 7D: +{liq['w_up_pct']}% / -{liq['w_down_pct']}%"
+        return f"⚡🟢 <b>EMA 50/100 ({tf}) + ЛИКВИДНОСТЬ — ЛОНГ</b>\n\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(price, 4)}</code>\n🎯 Цель: <code>{tp}</code>\n🛡️ Стоп: <code>{sl}</code>\n\n📊 {liq['advice']}\n📅 7D: ⬆️ <code>{round(liq['week_high'], 4)}</code> | ⬇️ <code>{round(liq['week_low'], 4)}</code>"
 
     if ema_bear and liq['priority'] == "SHORT":
         tp = round(liq['day_low'], 4) if liq['d_down_pct'] >= 1.0 else round(liq['week_low'], 4)
         sl = round(max(curr['ema100'], liq['day_high']) * 1.005, 4)
-        return f"⚡🔴 <b>EMA 50/100 ({tf}) + ЛИКВИДНОСТЬ — ШОРТ</b>\n\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(price, 4)}</code>\n🎯 Цель: <code>{tp}</code>\n🛡️ Стоп: <code>{sl}</code>\n\n📊 {liq['advice']}\n📅 7D: +{liq['w_up_pct']}% / -{liq['w_down_pct']}%"
+        return f"⚡🔴 <b>EMA 50/100 ({tf}) + ЛИКВИДНОСТЬ — ШОРТ</b>\n\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(price, 4)}</code>\n🎯 Цель: <code>{tp}</code>\n🛡️ Стоп: <code>{sl}</code>\n\n📊 {liq['advice']}\n📅 7D: ⬆️ <code>{round(liq['week_high'], 4)}</code> | ⬇️ <code>{round(liq['week_low'], 4)}</code>"
 
     if liq['week_bot_swept'] and curr['ema50'] > curr['ema100'] and curr['close'] > liq['week_low']:
-        return f"🌊🟢 <b>СНЯТ МИНИМУМ НЕДЕЛИ + EMA ({tf}) — ЛОНГ</b>\n\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(price, 4)}</code>\n🎯 Цель: <code>{round(liq['day_high'], 4)}</code> (+{liq['d_up_pct']}%)\n🛡️ Стоп: <code>{round(liq['week_low'] * 0.995, 4)}</code>"
+        return f"🌊🟢 <b>СНЯТ МИНИМУМ НЕДЕЛИ + EMA ({tf}) — ЛОНГ</b>\n\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(price, 4)}</code>\n🎯 Цель: <code>{round(liq['day_high'], 4)}</code>\n🛡️ Стоп: <code>{round(liq['week_low'] * 0.995, 4)}</code>"
 
     if liq['week_top_swept'] and curr['ema50'] < curr['ema100'] and curr['close'] < liq['week_high']:
-        return f"🌊🔴 <b>СНЯТ МАКСИМУМ НЕДЕЛИ + EMA ({tf}) — ШОРТ</b>\n\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(price, 4)}</code>\n🎯 Цель: <code>{round(liq['day_low'], 4)}</code> (-{liq['d_down_pct']}%)\n🛡️ Стоп: <code>{round(liq['week_high'] * 1.005, 4)}</code>"
+        return f"🌊🔴 <b>СНЯТ МАКСИМУМ НЕДЕЛИ + EMA ({tf}) — ШОРТ</b>\n\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(price, 4)}</code>\n🎯 Цель: <code>{round(liq['day_low'], 4)}</code>\n🛡️ Стоп: <code>{round(liq['week_high'] * 1.005, 4)}</code>"
 
     return None
 
@@ -185,8 +182,8 @@ if __name__ == "__main__":
 
         radar_lines.append(
             f"🪙 <b>{symbol}</b> (<code>{round(liq['price'], 4)}</code>){d_st}{w_st}\n"
-            f"   ├ 24H: ⬆️+{liq['d_up_pct']}% | ⬇️-{liq['d_down_pct']}%\n"
-            f"   └ 7D:  ⬆️+{liq['w_up_pct']}% | ⬇️-{liq['w_down_pct']}%"
+            f"   ├ 24H: ⬆️ <code>{round(liq['day_high'], 4)}</code> | ⬇️ <code>{round(liq['day_low'], 4)}</code>\n"
+            f"   └ 7D:  ⬆️ <code>{round(liq['week_high'], 4)}</code> | ⬇️ <code>{round(liq['week_low'], 4)}</code>"
         )
 
         for tf in ["1h", "4h"]:
@@ -200,7 +197,7 @@ if __name__ == "__main__":
         send_telegram(s)
 
     if radar_lines:
-        map_msg = "🗺️ <b>КАРТА ЛИКВИДНОСТИ (24H / 7D)</b>\n<i>Сигналы EMA 50/100 на 1H и 4H:</i>\n\n" + "\n".join(radar_lines)
+        map_msg = "🗺️ <b>УРОВНИ ЛИКВИДНОСТИ ДЛЯ ЛОВУШЕК (24H / 7D)</b>\n<i>Сигналы EMA 50/100 на 1H и 4H:</i>\n\n" + "\n".join(radar_lines)
         send_telegram(map_msg)
     else:
         send_telegram("⚠️ <b>Сбой связи с биржами</b>: Серверы не отдали свечи по монетам.")
