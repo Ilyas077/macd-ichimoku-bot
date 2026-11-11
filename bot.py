@@ -180,10 +180,10 @@ if __name__ == "__main__":
         d_st = (" [24H ВЕРХ СНЯТ]" if liq['day_top_swept'] else "") + (" [24H НИЗ СНЯТ]" if liq['day_bot_swept'] else "")
         w_st = (" [7D ВЕРХ СНЯТ]" if liq['week_top_swept'] else "") + (" [7D НИЗ СНЯТ]" if liq['week_bot_swept'] else "")
 
-        radar_lines.append(
-            f"🪙 <b>{symbol}</b> (<code>{round(liq['price'], 4)}</code>){d_st}{w_st}\n"
-            f"   ├ 24H: ⬆️ <code>{round(liq['day_high'], 4)}</code> | ⬇️ <code>{round(liq['day_low'], 4)}</code>\n"
-            f"   └ 7D:  ⬆️ <code>{round(liq['week_high'], 4)}</code> | ⬇️ <code>{round(liq['week_low'], 4)}</code>"
+                radar_lines.append(
+            f"🪙 <b>{symbol}</b>  —  <code>{round(liq['price'], 4)}</code>{d_st}{w_st}\n"
+            f"   24H:  ⬆️ <code>{round(liq['day_high'], 4)}</code>   |   ⬇️ <code>{round(liq['day_low'], 4)}</code>\n"
+            f"   7D:   ⬆️ <code>{round(liq['week_high'], 4)}</code>   |   ⬇️ <code>{round(liq['week_low'], 4)}</code>"
         )
 
         for tf in ["1h", "4h"]:
@@ -197,7 +197,8 @@ if __name__ == "__main__":
         send_telegram(s)
 
     if radar_lines:
-        map_msg = "🗺️ <b>УРОВНИ ЛИКВИДНОСТИ ДЛЯ ЛОВУШЕК (24H / 7D)</b>\n<i>Сигналы EMA 50/100 на 1H и 4H:</i>\n\n" + "\n".join(radar_lines)
+        map_msg = "🗺️ <b>УРОВНИ ЛИКВИДНОСТИ (24H / 7D)</b>\n<i>Сигналы EMA 50/100 на 1H и 4H:</i>\n\n" + "\n\n".join(radar_lines)
         send_telegram(map_msg)
+
     else:
         send_telegram("⚠️ <b>Сбой связи с биржами</b>: Серверы не отдали свечи по монетам.")
