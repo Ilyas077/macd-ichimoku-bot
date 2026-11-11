@@ -1,7 +1,6 @@
 import os
 import time
 import base64
-import datetime
 import requests
 import pandas as pd
 
@@ -29,8 +28,7 @@ def send_telegram(message):
     if not TG_TOKEN:
         print("ОШИБКА: TG_TOKEN пустой!")
         return
-    token_clean = TG_TOKEN.strip()
-    url = f"{TG_API_BASE}{token_clean}/sendMessage"
+    url = f"{TG_API_BASE}{TG_TOKEN.strip()}/sendMessage"
     try:
         r = requests.post(url, json={"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
         print(f"СТАТУС ТЕЛЕГРАМ: {r.status_code} | ОТВЕТ: {r.text}")
@@ -48,8 +46,8 @@ def get_candles(symbol, timeframe="1h", limit=150):
                 for col in ['open', 'high', 'low', 'close']:
                     df[col] = df[col].astype(float)
                 return df
-    except Exception as e:
-        print(f"BV error {symbol}: {e}")
+    except Exception:
+        pass
 
     coin = symbol.replace("USDT", "")
     url_cb = f"{CB_BASE}{coin}-USD/candles"
@@ -69,10 +67,7 @@ def get_candles(symbol, timeframe="1h", limit=150):
                     elif timeframe == "4h":
                         df['dt'] = pd.to_datetime(df['timestamp'], unit='s')
                         df.set_index('dt', inplace=True)
-                        df_4h = df.resample('4h').agg({
-                            'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'
-                        }).dropna().reset_index()
-                        return df_4h
+                        return df.resample('4h').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}).dropna().reset_index()
         elif timeframe == "1d":
             r = requests.get(url_cb, params={"granularity": 86400}, headers=HEADERS, timeout=10)
             if r.status_code == 200:
@@ -83,8 +78,8 @@ def get_candles(symbol, timeframe="1h", limit=150):
                     for col in ['open', 'high', 'low', 'close']:
                         df[col] = df[col].astype(float)
                     return df
-    except Exception as e:
-        print(f"CB error {symbol}: {e}")
+    except Exception:
+        pass
 
     return None
 
@@ -98,25 +93,19 @@ def get_liquidity_pools(symbol):
 
     price = df_1h.iloc[-1]['close']
 
-    # Суточная ликвидность (за предыдущие 24 часа)
     day_window = df_1h.iloc[-26:-2]
     day_high = day_window['high'].max()
     day_low = day_window['low'].min()
 
-    recent_2h_high = df_1h.iloc[-2:]['high'].max()
-    recent_2h_low = df_1h.iloc[-2:]['low'].min()
-    day_top_swept = recent_2h_high >= day_high
-    day_bot_swept = recent_2h_low <= day_low
+    day_top_swept = df_1h.iloc[-2:]['high'].max() >= day_high
+    day_bot_swept = df_1h.iloc[-2:]['low'].min() <= day_low
 
-    # Недельная ликвидность (за предыдущие 7 закрытых дней)
     week_window = df_1d.iloc[-8:-1]
     week_high = week_window['high'].max()
     week_low = week_window['low'].min()
 
-    today_high = df_1d.iloc[-1]['high']
-    today_low = df_1d.iloc[-1]['low']
-    week_top_swept = today_high >= week_high
-    week_bot_swept = today_low <= week_low
+    week_top_swept = df_1d.iloc[-1]['high'] >= week_high
+    week_bot_swept = df_1d.iloc[-1]['low'] <= week_low
 
     d_up_pct = round(((day_high - price) / price) * 100, 2)
     d_down_pct = round(((price - day_low) / price) * 100, 2)
@@ -125,10 +114,10 @@ def get_liquidity_pools(symbol):
 
     if day_top_swept and not day_bot_swept:
         priority = "SHORT"
-        advice = f"⬆️ Суточный верх СНЯТ ({round(day_high, 4)}). Выгоднее идти ВНИЗ к суточному дну {round(day_low, 4)} (-{d_down_pct}%)."
+        advice = f"⬆️ Суточный верх СНЯТ ({round(day_high, 4)}). Выгоднее идти ВНИЗ к {round(day_low, 4)} (-{d_down_pct}%)."
     elif day_bot_swept and not day_top_swept:
         priority = "LONG"
-        advice = f"⬇️ Суточный низ СНЯТ ({round(day_low, 4)}). Выгоднее идти ВВЕРХ к суточному пику {round(day_high, 4)} (+{d_up_pct}%)."
+        advice = f"⬇️ Суточный низ СНЯТ ({round(day_low, 4)}). Выгоднее идти ВВЕРХ к {round(day_high, 4)} (+{d_up_pct}%)."
     elif abs(d_down_pct) < abs(d_up_pct):
         priority = "SHORT"
         advice = f"🧲 Ближе суточный НИЗ: идти <b>-{d_down_pct}%</b> до {round(day_low, 4)} (до верха +{d_up_pct}%)."
@@ -137,15 +126,13 @@ def get_liquidity_pools(symbol):
         advice = f"🧲 Ближе суточный ВЕРХ: идти <b>+{d_up_pct}%</b> до {round(day_high, 4)} (до низа -{d_down_pct}%)."
 
     return {
-        "price": price,
-        "day_high": day_high, "day_low": day_low,
+        "price": price, "day_high": day_high, "day_low": day_low,
         "d_up_pct": d_up_pct, "d_down_pct": d_down_pct,
         "day_top_swept": day_top_swept, "day_bot_swept": day_bot_swept,
         "week_high": week_high, "week_low": week_low,
         "w_up_pct": w_up_pct, "w_down_pct": w_down_pct,
         "week_top_swept": week_top_swept, "week_bot_swept": week_bot_swept,
-        "priority": priority,
-        "advice": advice
+        "priority": priority, "advice": advice
     }
 
 # --- 5. ПРОВЕРКА СИГНАЛОВ ПО EMA 50/100 (1H И 4H) ---
@@ -160,68 +147,60 @@ def check_signals(symbol, liq, timeframe="1h"):
     curr = df.iloc[-2]
     prev = df.iloc[-3]
     price = curr['close']
+    tf = timeframe.upper()
 
-    ema_bull_cross = (prev['ema50'] <= prev['ema100']) and (curr['ema50'] > curr['ema100'])
-    ema_bear_cross = (prev['ema50'] >= prev['ema100']) and (curr['ema50'] < curr['ema100'])
-    tf_label = timeframe.upper()
+    ema_bull = (prev['ema50'] <= prev['ema100']) and (curr['ema50'] > curr['ema100'])
+    ema_bear = (prev['ema50'] >= prev['ema100']) and (curr['ema50'] < curr['ema100'])
 
-    if ema_bull_cross and liq['priority'] == "LONG":
+    if ema_bull and liq['priority'] == "LONG":
         tp = round(liq['day_high'], 4) if liq['d_up_pct'] >= 1.0 else round(liq['week_high'], 4)
         sl = round(min(curr['ema100'], liq['day_low']) * 0.995, 4)
-        return (
-            f"⚡🟢 <b>EMA 50/100 ({tf_label}) + ЛИКВИДНОСТЬ — ЛОНГ</b>\n\n"
-            f"🪙 Монета: <b>#{symbol}</b>\n"
-            f"💵 Вход: <code>{round(price, 4)}</code>\n"
-            f"🎯 Цель (пул стопов): <code>{tp}</code>\n"
-            f"🛡️ Стоп-лосс: <code>{sl}</code>\n\n"
-            f"📊 <b>Анализ ликвидности:</b>\n{liq['advice']}\n"
-            f"📅 Неделя (7D): Верх {round(liq['week_high'], 4)} (+{liq['w_up_pct']}%) | Низ {round(liq['week_low'], 4)} (-{liq['w_down_pct']}%)"
-        )
+        return f"⚡🟢 <b>EMA 50/100 ({tf}) + ЛИКВИДНОСТЬ — ЛОНГ</b>\n\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(price, 4)}</code>\n🎯 Цель: <code>{tp}</code>\n🛡️ Стоп: <code>{sl}</code>\n\n📊 {liq['advice']}\n📅 7D: +{liq['w_up_pct']}% / -{liq['w_down_pct']}%"
 
-    if ema_bear_cross and liq['priority'] == "SHORT":
+    if ema_bear and liq['priority'] == "SHORT":
         tp = round(liq['day_low'], 4) if liq['d_down_pct'] >= 1.0 else round(liq['week_low'], 4)
         sl = round(max(curr['ema100'], liq['day_high']) * 1.005, 4)
-        return (
-            f"⚡🔴 <b>EMA 50/100 ({tf_label}) + ЛИКВИДНОСТЬ — ШОРТ</b>\n\n"
-            f"🪙 Монета: <b>#{symbol}</b>\n"
-            f"💵 Вход: <code>{round(price, 4)}</code>\n"
-            f"🎯 Цель (пул стопов): <code>{tp}</code>\n"
-            f"🛡️ Стоп-лосс: <code>{sl}</code>\n\n"
-            f"📊 <b>Анализ ликвидности:</b>\n{liq['advice']}\n"
-            f"📅 Неделя (7D): Верх {round(liq['week_high'], 4)} (+{liq['w_up_pct']}%) | Низ {round(liq['week_low'], 4)} (-{liq['w_down_pct']}%)"
-        )
+        return f"⚡🔴 <b>EMA 50/100 ({tf}) + ЛИКВИДНОСТЬ — ШОРТ</b>\n\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(price, 4)}</code>\n🎯 Цель: <code>{tp}</code>\n🛡️ Стоп: <code>{sl}</code>\n\n📊 {liq['advice']}\n📅 7D: +{liq['w_up_pct']}% / -{liq['w_down_pct']}%"
 
     if liq['week_bot_swept'] and curr['ema50'] > curr['ema100'] and curr['close'] > liq['week_low']:
-        return (
-            f"🌊🟢 <b>СНЯТ МИНИМУМ НЕДЕЛИ + EMA ({tf_label}) — ЛОНГ</b>\n\n"
-            f"🪙 Монета: <b>#{symbol}</b>\n"
-            f"💵 Вход: <code>{round(price, 4)}</code>\n"
-            f"🎯 Цель (суточный пик): <code>{round(liq['day_high'], 4)}</code> (+{liq['d_up_pct']}%)\n"
-            f"🛡️ Стоп (за минимум недели): <code>{round(liq['week_low'] * 0.995, 4)}</code>"
-        )
+        return f"🌊🟢 <b>СНЯТ МИНИМУМ НЕДЕЛИ + EMA ({tf}) — ЛОНГ</b>\n\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(price, 4)}</code>\n🎯 Цель: <code>{round(liq['day_high'], 4)}</code> (+{liq['d_up_pct']}%)\n🛡️ Стоп: <code>{round(liq['week_low'] * 0.995, 4)}</code>"
 
     if liq['week_top_swept'] and curr['ema50'] < curr['ema100'] and curr['close'] < liq['week_high']:
-        return (
-            f"🌊🔴 <b>СНЯТ МАКСИМУМ НЕДЕЛИ + EMA ({tf_label}) — ШОРТ</b>\n\n"
-            f"🪙 Монета: <b>#{symbol}</b>\n"
-            f"💵 Вход: <code>{round(price, 4)}</code>\n"
-            f"🎯 Цель (суточное дно): <code>{round(liq['day_low'], 4)}</code> (-{liq['d_down_pct']}%)\n"
-            f"🛡️ Стоп (за максимум недели): <code>{round(liq['week_high'] * 1.005, 4)}</code>"
-        )
+        return f"🌊🔴 <b>СНЯТ МАКСИМУМ НЕДЕЛИ + EMA ({tf}) — ШОРТ</b>\n\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(price, 4)}</code>\n🎯 Цель: <code>{round(liq['day_low'], 4)}</code> (-{liq['d_down_pct']}%)\n🛡️ Стоп: <code>{round(liq['week_high'] * 1.005, 4)}</code>"
 
     return None
 
-# --- 6. ЗАПУСК (ВРЕМЯ КАЗАХСТАН UTC+5) ---
+# --- 6. ЗАПУСК ---
 if __name__ == "__main__":
-    kz_tz = datetime.timezone(datetime.timedelta(hours=5))
-    now_kz = datetime.datetime.now(kz_tz)
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-    
-    time_str = now_kz.strftime("%d.%m.%Y %H:%M")
-    current_hour_utc = now_utc.hour
-    is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
-
     signals = []
     radar_lines = []
 
     for symbol in SYMBOLS:
+        liq = get_liquidity_pools(symbol)
+        if not liq:
+            continue
+
+        d_st = (" [24H ВЕРХ СНЯТ]" if liq['day_top_swept'] else "") + (" [24H НИЗ СНЯТ]" if liq['day_bot_swept'] else "")
+        w_st = (" [7D ВЕРХ СНЯТ]" if liq['week_top_swept'] else "") + (" [7D НИЗ СНЯТ]" if liq['week_bot_swept'] else "")
+
+        radar_lines.append(
+            f"🪙 <b>{symbol}</b> (<code>{round(liq['price'], 4)}</code>){d_st}{w_st}\n"
+            f"   ├ 24H: ⬆️+{liq['d_up_pct']}% | ⬇️-{liq['d_down_pct']}%\n"
+            f"   └ 7D:  ⬆️+{liq['w_up_pct']}% | ⬇️-{liq['w_down_pct']}%"
+        )
+
+        for tf in ["1h", "4h"]:
+            sig = check_signals(symbol, liq, tf)
+            if sig:
+                signals.append(sig)
+
+        time.sleep(0.3)
+
+    for s in signals:
+        send_telegram(s)
+
+    if radar_lines:
+        map_msg = "🗺️ <b>КАРТА ЛИКВИДНОСТИ (24H / 7D)</b>\n<i>Сигналы EMA 50/100 на 1H и 4H:</i>\n\n" + "\n".join(radar_lines)
+        send_telegram(map_msg)
+    else:
+        send_telegram("⚠️ <b>Сбой связи с биржами</b>: Серверы не отдали свечи по монетам.")
