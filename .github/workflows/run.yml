@@ -1,26 +1,38 @@
-name: macd-ichimoku-scanner
+name: Liquidity & EMA 50/100 Scanner
 
 on:
-  workflow_dispatch:
   schedule:
-        - cron: '5 * * * *'
-
+    - cron: '2 * * * *'
+  workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - name: check-repo
-        uses: actions/checkout@v4
-
-      - name: setup-python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
+      - run: pip install pandas numpy requests
+      - run: python bot.py
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+name: Liquidity & EMA 50/100 Scanner
 
-      - name: install-libs
-        run: |
-          pip install ccxt pandas numpy requests
+on:
+  schedule:
+    - cron: '2 * * * *'
+  workflow_dispatch:
 
-      - name: run-bot-script
-        run: python bot.py
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pandas numpy requests
+      - run: python bot.py
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
