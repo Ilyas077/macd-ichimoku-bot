@@ -7,13 +7,13 @@ import numpy as np
 import pandas as pd
 
 # --- 1. НАСТРОЙКИ ---
-TG_TOKEN = "9255233645:AAFk5WNpiMgyRS50hKj1QE6xrNUMKDrr2vo"
+TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_CHAT_ID = "531386055"
 
 SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "INJUSDT", 
-    "SUIUSDT", "XRPUSDT", "AVAXUSDT", "TAOUSDT", 
-    "HYPEUSDT", "ENAUSDT", "JTOUSDT", "AAVEUSDT"
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", 
+    "UNIUSDT", "AVAXUSDT", "SUIUSDT", "INJUSDT", 
+    "AAVEUSDT", "JTOUSDT", "ENAUSDT", "TAOUSDT"
 ]
 
 HEADERS = {
@@ -21,46 +21,30 @@ HEADERS = {
     "Accept": "application/json"
 }
 
-CB_BASE = base64.b64decode("aHR0cHM6Ly9hcGkuZXhjaGFuZ2UuY29pbmJhc2UuY29tL3Byb2R1Y3RzLw==").decode()
 BV_URL = base64.b64decode("aHR0cHM6Ly9kYXRhLWFwaS5iaW5hbmNlLnZpc2lvbi9hcGkvdjMva2xpbmVz").decode()
-
-# --- 2. ОТПРАВКА В TELEGRAM (ЗАЩИЩЕННЫЙ URL) ---
+CB_BASE = base64.b64decode("aHR0cHM6Ly9hcGkuZXhjaGFuZ2UuY29pbmJhc2UuY29tL3Byb2R1Y3RzLw==").decode()
 TG_API_BASE = base64.b64decode("aHR0cHM6Ly9hcGkudGVsZWdyYW0ub3JnL2JvdA==").decode()
 
+# --- 2. ОТПРАВКА В TELEGRAM ---
 def send_telegram(message):
+    if not TG_TOKEN:
+        print("Ошибка: TG_TOKEN не найден в Secrets!")
+        return
     url = f"{TG_API_BASE}{TG_TOKEN}/sendMessage"
     try:
         r = requests.post(url, json={"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
         if r.status_code != 200:
             print(f"Ошибка Telegram API: {r.text}")
     except Exception as e:
-        print(f"Сбой отправки в Telegram: {e}")
+        print(f"Сбой отправки: {e}")
 
-# --- 3. ПОЛУЧЕНИЕ ЧАСОВЫХ СВЕЧЕЙ (1H) ---
-def get_1h_candles(symbol, limit=150):
-    coin = symbol.replace("USDT", "")
-    
-    # Канал 1: Coinbase
-    url_cb = f"{CB_BASE}{coin}-USD/candles"
+# --- 3. ПОЛУЧЕНИЕ СВЕЧЕЙ (1h, 4h, 1d) ---
+def get_candles(symbol, timeframe="1h", limit=150):
     try:
-        r = requests.get(url_cb, params={"granularity": 3600}, headers=HEADERS, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            if isinstance(data, list) and len(data) > 60:
-                df = pd.DataFrame(data[:limit], columns=['timestamp', 'low', 'high', 'open', 'close', 'volume'])
-                df = df.iloc[::-1].reset_index(drop=True)
-                for col in ['open', 'high', 'low', 'close']:
-                    df[col] = df[col].astype(float)
-                return df
-    except Exception:
-        pass
-
-    # Канал 2: Зеркало Binance Vision
-    try:
-        r_bv = requests.get(BV_URL, params={"symbol": symbol, "interval": "1h", "limit": limit}, headers=HEADERS, timeout=10)
+        r_bv = requests.get(BV_URL, params={"symbol": symbol, "interval": timeframe, "limit": limit}, headers=HEADERS, timeout=10)
         if r_bv.status_code == 200:
             data_bv = r_bv.json()
-            if isinstance(data_bv, list) and len(data_bv) > 60:
+            if isinstance(data_bv, list) and len(data_bv) >= 8:
                 df = pd.DataFrame([row[:6] for row in data_bv], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 for col in ['open', 'high', 'low', 'close']:
                     df[col] = df[col].astype(float)
@@ -68,96 +52,174 @@ def get_1h_candles(symbol, limit=150):
     except Exception:
         pass
 
+    coin = symbol.replace("USDT", "")
+    url_cb = f"{CB_BASE}{coin}-USD/candles"
+    try:
+        if timeframe in ["1h", "4h"]:
+            req_limit = 300 if timeframe == "4h" else limit
+            r = requests.get(url_cb, params={"granularity": 3600}, headers=HEADERS, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, list) and len(data) >= 20:
+                    df = pd.DataFrame(data[:req_limit], columns=['timestamp', 'low', 'high', 'open', 'close', 'volume'])
+                    df = df.iloc[::-1].reset_index(drop=True)
+                    for col in ['open', 'high', 'low', 'close']:
+                        df[col] = df[col].astype(float)
+                    if timeframe == "1h":
+                        return df
+                    elif timeframe == "4h":
+                        df['dt'] = pd.to_datetime(df['timestamp'], unit='s')
+                        df.set_index('dt', inplace=True)
+                        df_4h = df.resample('4h').agg({
+                            'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'
+                        }).dropna().reset_index()
+                        return df_4h
+        elif timeframe == "1d":
+            r = requests.get(url_cb, params={"granularity": 86400}, headers=HEADERS, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, list) and len(data) >= 8:
+                    df = pd.DataFrame(data[:limit], columns=['timestamp', 'low', 'high', 'open', 'close', 'volume'])
+                    df = df.iloc[::-1].reset_index(drop=True)
+                    for col in ['open', 'high', 'low', 'close']:
+                        df[col] = df[col].astype(float)
+                    return df
+    except Exception:
+        pass
+
     return None
 
-# --- 4. РАСЧЕТ MACD И ОБЛАКА ИШИМОКУ ---
-def add_ichimoku_macd(df):
-    ema12 = df['close'].ewm(span=12, adjust=False).mean()
-    ema26 = df['close'].ewm(span=26, adjust=False).mean()
-    df['macd'] = ema12 - ema26
-    df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
-    df['macd_hist'] = df['macd'] - df['macd_signal']
+# --- 4. РАСЧЕТ СУТОЧНОЙ (24H) И НЕДЕЛЬНОЙ (7D) ЛИКВИДНОСТИ ---
+def get_liquidity_pools(symbol):
+    df_1h = get_candles(symbol, timeframe="1h", limit=40)
+    df_1d = get_candles(symbol, timeframe="1d", limit=12)
 
-    high_9 = df['high'].rolling(window=9).max()
-    low_9 = df['low'].rolling(window=9).min()
-    tenkan_sen = (high_9 + low_9) / 2
-
-    high_26 = df['high'].rolling(window=26).max()
-    low_26 = df['low'].rolling(window=26).min()
-    kijun_sen = (high_26 + low_26) / 2
-
-    df['senkou_a'] = ((tenkan_sen + kijun_sen) / 2).shift(26)
-    
-    high_52 = df['high'].rolling(window=52).max()
-    low_52 = df['low'].rolling(window=52).min()
-    df['senkou_b'] = ((high_52 + low_52) / 2).shift(26)
-
-    df['future_a'] = (tenkan_sen + kijun_sen) / 2
-    df['future_b'] = (high_52 + low_52) / 2
-
-    return df
-
-# --- 5. ПОИСК СИГНАЛОВ ---
-def check_coin(symbol):
-    df = get_1h_candles(symbol, limit=150)
-    if df is None or len(df) < 80:
+    if df_1h is None or len(df_1h) < 28 or df_1d is None or len(df_1d) < 9:
         return None
 
-    df = add_ichimoku_macd(df)
-    
+    price = df_1h.iloc[-1]['close']
+
+    # Суточная ликвидность (за предыдущие 24 часа)
+    day_window = df_1h.iloc[-26:-2]
+    day_high = day_window['high'].max()
+    day_low = day_window['low'].min()
+
+    # Снятие суточной ликвидности за последние 2 часа
+    recent_2h_high = df_1h.iloc[-2:]['high'].max()
+    recent_2h_low = df_1h.iloc[-2:]['low'].min()
+    day_top_swept = recent_2h_high >= day_high
+    day_bot_swept = recent_2h_low <= day_low
+
+    # Недельная ликвидность (за предыдущие 7 закрытых дней)
+    week_window = df_1d.iloc[-8:-1]
+    week_high = week_window['high'].max()
+    week_low = week_window['low'].min()
+
+    # Снятие недельной ликвидности за сегодня
+    today_high = df_1d.iloc[-1]['high']
+    today_low = df_1d.iloc[-1]['low']
+    week_top_swept = today_high >= week_high
+    week_bot_swept = today_low <= week_low
+
+    # Расчет расстояний в процентах
+    d_up_pct = round(((day_high - price) / price) * 100, 2)
+    d_down_pct = round(((price - day_low) / price) * 100, 2)
+    w_up_pct = round(((week_high - price) / price) * 100, 2)
+    w_down_pct = round(((price - week_low) / price) * 100, 2)
+
+    # Приоритет движения к неснятым стопам
+    if day_top_swept and not day_bot_swept:
+        priority = "SHORT"
+        advice = f"⬆️ Суточный верх СНЯТ ({round(day_high, 4)}). Выгоднее идти ВНИЗ к суточному дну {round(day_low, 4)} (-{d_down_pct}%)."
+    elif day_bot_swept and not day_top_swept:
+        priority = "LONG"
+        advice = f"⬇️ Суточный низ СНЯТ ({round(day_low, 4)}). Выгоднее идти ВВЕРХ к суточному пику {round(day_high, 4)} (+{d_up_pct}%)."
+    elif abs(d_down_pct) < abs(d_up_pct):
+        priority = "SHORT"
+        advice = f"🧲 Ближе суточный НИЗ: идти <b>-{d_down_pct}%</b> до {round(day_low, 4)} (до верха +{d_up_pct}%)."
+    else:
+        priority = "LONG"
+        advice = f"🧲 Ближе суточный ВЕРХ: идти <b>+{d_up_pct}%</b> до {round(day_high, 4)} (до низа -{d_down_pct}%)."
+
+    return {
+        "price": price,
+        "day_high": day_high, "day_low": day_low,
+        "d_up_pct": d_up_pct, "d_down_pct": d_down_pct,
+        "day_top_swept": day_top_swept, "day_bot_swept": day_bot_swept,
+        "week_high": week_high, "week_low": week_low,
+        "w_up_pct": w_up_pct, "w_down_pct": w_down_pct,
+        "week_top_swept": week_top_swept, "week_bot_swept": week_bot_swept,
+        "priority": priority,
+        "advice": advice
+    }
+
+# --- 5. ПРОВЕРКА СИГНАЛОВ ПО EMA 50/100 (1H И 4H) И ЛИКВИДНОСТИ ---
+def check_signals(symbol, liq, timeframe="1h"):
+    df = get_candles(symbol, timeframe=timeframe, limit=130)
+    if df is None or len(df) < 105:
+        return None
+
+    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+    df['ema100'] = df['close'].ewm(span=100, adjust=False).mean()
+
     curr = df.iloc[-2]
     prev = df.iloc[-3]
     price = curr['close']
 
-    cloud_top = max(curr['senkou_a'], curr['senkou_b'])
-    cloud_bottom = min(curr['senkou_a'], curr['senkou_b'])
+    ema_bull_cross = (prev['ema50'] <= prev['ema100']) and (curr['ema50'] > curr['ema100'])
+    ema_bear_cross = (prev['ema50'] >= prev['ema100']) and (curr['ema50'] < curr['ema100'])
 
-    macd_bull_cross = (prev['macd'] <= prev['macd_signal']) and (curr['macd'] > curr['macd_signal'])
-    macd_bear_cross = (prev['macd'] >= prev['macd_signal']) and (curr['macd'] < curr['macd_signal'])
+    tf_label = timeframe.upper()
 
-    if price > cloud_top and curr['future_a'] > curr['future_b'] and macd_bull_cross:
-        sl = round(price * 0.988, 4)
-        tp = round(price * 1.025, 4)
+    # 1. ПЕРЕСЕЧЕНИЕ EMA 50/100 В СТОРОНУ БЛИЖАЙШЕЙ ЛИКВИДНОСТИ
+    if ema_bull_cross and liq['priority'] == "LONG":
+        tp = round(liq['day_high'], 4) if liq['d_up_pct'] >= 1.0 else round(liq['week_high'], 4)
+        sl = round(min(curr['ema100'], liq['day_low']) * 0.995, 4)
         return (
-            f"☁️🟢 <b>ИШИМОКУ + MACD ЛОНГ (1H)</b>\n\n"
+            f"⚡🟢 <b>EMA 50/100 ({tf_label}) + ЛИКВИДНОСТЬ — ЛОНГ</b>\n\n"
             f"🪙 Монета: <b>#{symbol}</b>\n"
             f"💵 Вход: <code>{round(price, 4)}</code>\n"
-            f"🛡️ Стоп (-1.2%): <code>{sl}</code>\n"
-            f"💰 Тейк (+2.5%): <code>{tp}</code>\n\n"
-            f"📊 <i>Цена пробила/удержала верх Облака Ишимоку, MACD развернулся вверх.</i>"
+            f"🎯 Цель (пул стопов): <code>{tp}</code>\n"
+            f"🛡️ Стоп-лосс: <code>{sl}</code>\n\n"
+            f"📊 <b>Анализ ликвидности:</b>\n{liq['advice']}\n"
+            f"📅 Неделя (7D): Верх {round(liq['week_high'], 4)} (+{liq['w_up_pct']}%) | Низ {round(liq['week_low'], 4)} (-{liq['w_down_pct']}%)"
         )
 
-    if price < cloud_bottom and curr['future_a'] < curr['future_b'] and macd_bear_cross:
-        sl = round(price * 1.012, 4)
-        tp = round(price * 0.975, 4)
+    if ema_bear_cross and liq['priority'] == "SHORT":
+        tp = round(liq['day_low'], 4) if liq['d_down_pct'] >= 1.0 else round(liq['week_low'], 4)
+        sl = round(max(curr['ema100'], liq['day_high']) * 1.005, 4)
         return (
-            f"☁️🔴 <b>ИШИМОКУ + MACD ШОРТ (1H)</b>\n\n"
+            f"⚡🔴 <b>EMA 50/100 ({tf_label}) + ЛИКВИДНОСТЬ — ШОРТ</b>\n\n"
             f"🪙 Монета: <b>#{symbol}</b>\n"
             f"💵 Вход: <code>{round(price, 4)}</code>\n"
-            f"🛡️ Стоп (+1.2%): <code>{sl}</code>\n"
-            f"💰 Тейк (-2.5%): <code>{tp}</code>\n\n"
-            f"📊 <i>Цена под Облаком Ишимоку, MACD развернулся вниз.</i>"
+            f"🎯 Цель (пул стопов): <code>{tp}</code>\n"
+            f"🛡️ Стоп-лосс: <code>{sl}</code>\n\n"
+            f"📊 <b>Анализ ликвидности:</b>\n{liq['advice']}\n"
+            f"📅 Неделя (7D): Верх {round(liq['week_high'], 4)} (+{liq['w_up_pct']}%) | Низ {round(liq['week_low'], 4)} (-{liq['w_down_pct']}%)"
+        )
+
+    # 2. СНЯТИЕ НЕДЕЛЬНОЙ ЛИКВИДНОСТИ + ТРЕНД ПО EMA 50/100
+    if liq['week_bot_swept'] and curr['ema50'] > curr['ema100'] and curr['close'] > liq['week_low']:
+        return (
+            f"🌊🟢 <b>СНЯТ МИНИМУМ НЕДЕЛИ + EMA ({tf_label}) — ЛОНГ</b>\n\n"
+            f"🪙 Монета: <b>#{symbol}</b>\n"
+            f"💵 Вход: <code>{round(price, 4)}</code>\n"
+            f"🎯 Цель (суточный пик): <code>{round(liq['day_high'], 4)}</code> (+{liq['d_up_pct']}%)\n"
+            f"🛡️ Стоп (за минимум недели): <code>{round(liq['week_low'] * 0.995, 4)}</code>"
+        )
+
+    if liq['week_top_swept'] and curr['ema50'] < curr['ema100'] and curr['close'] < liq['week_high']:
+        return (
+            f"🌊🔴 <b>СНЯТ МАКСИМУМ НЕДЕЛИ + EMA ({tf_label}) — ШОРТ</b>\n\n"
+            f"🪙 Монета: <b>#{symbol}</b>\n"
+            f"💵 Вход: <code>{round(price, 4)}</code>\n"
+            f"🎯 Цель (суточное дно): <code>{round(liq['day_low'], 4)}</code> (-{liq['d_down_pct']}%)\n"
+            f"🛡️ Стоп (за максимум недели): <code>{round(liq['week_high'] * 1.005, 4)}</code>"
         )
 
     return None
 
-# --- 6. ЗАПУСК ---
+# --- 6. ЗАПУСК (ВРЕМЯ КАЗАХСТАН UTC+5) ---
 if __name__ == "__main__":
-    print("Запуск сканера Ишимоку + MACD (1H)...")
-    is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
-    
-    if is_manual:
-        send_telegram("☁️ <b>Бот Ишимоку + MACD (1H) запущен!</b> Проверяю 12 монет...")
-
-    found = 0
-    for symbol in SYMBOLS:
-        signal_msg = check_coin(symbol)
-        if signal_msg:
-            send_telegram(signal_msg)
-            found += 1
-        time.sleep(1)
-
-    if is_manual and found == 0:
-        send_telegram("☁️ Проверка Ишимоку + MACD завершена. На закрытии текущего часа сильных трендовых сигналов нет.")
-    
-    print(f"Готово. Найдено сигналов: {found}")
+    kz_tz = datetime.timezone(datetime.timedelta(hours=5))
+    now_kz = datetime.datetime.now(kz_tz)
