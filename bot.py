@@ -28,7 +28,7 @@ def send_telegram(message):
 def get_candles(symbol, timeframe="1h", limit=150):
     try:
         r_bv = requests.get(BV_URL, params={"symbol": symbol, "interval": timeframe, "limit": limit}, headers=HEADERS, timeout=10)
-        if r_bv.status_code == 200 and isinstance(r_bv.json(), list) and len(r_bv.json()) >= 15:
+        if r_bv.status_code == 200 and isinstance(r_bv.json(), list) and len(r_bv.json()) >= 10:
             df = pd.DataFrame([row[:6] for row in r_bv.json()], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             for col in ['open', 'high', 'low', 'close']: df[col] = df[col].astype(float)
             return df
@@ -37,7 +37,13 @@ def get_candles(symbol, timeframe="1h", limit=150):
     coin = symbol.replace("USDT", "")
     url_cb = f"{CB_BASE}{coin}-USD/candles"
     try:
-        if timeframe in ["1h", "4h"]:
+        if timeframe == "15m":
+            r = requests.get(url_cb, params={"granularity": 900}, headers=HEADERS, timeout=10)
+            if r.status_code == 200 and isinstance(r.json(), list) and len(r.json()) >= 10:
+                df = pd.DataFrame(r.json()[:limit], columns=['timestamp', 'low', 'high', 'open', 'close', 'volume']).iloc[::-1].reset_index(drop=True)
+                for col in ['open', 'high', 'low', 'close']: df[col] = df[col].astype(float)
+                return df
+        elif timeframe in ["1h", "4h"]:
             req_limit = 300 if timeframe == "4h" else limit
             r = requests.get(url_cb, params={"granularity": 3600}, headers=HEADERS, timeout=10)
             if r.status_code == 200 and isinstance(r.json(), list) and len(r.json()) >= 20:
@@ -124,6 +130,32 @@ def analyze_coin(symbol, btc_code, btc_txt):
             sl = round(max(c['ema100'], day_high) * 1.005, 4)
             found.append(f"⚡🔴 <b>ТРЕНД EMA 50/100 ({tf.upper()}) — ШОРТ</b>\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(live_p, 4)}</code>\n🎯 Цель: <code>{tp}</code>\n🛡️ Стоп: <code>{sl}</code>\n🚂 {btc_txt}")
 
+    # 3. СВЕЧНАЯ ЛЕСЕНКА НА 15M (3 зеленые вверх или 3 красные вниз)
+    df_15m = get_candles(symbol, "15m", 10)
+    if df_15m is not None and len(df_15m) >= 5:
+        c1, c2, c3 = df_15m.iloc[-4], df_15m.iloc[-3], df_15m.iloc[-2]
+        
+        is_3_green = (c1['close'] > c1['open']) and (c2['close'] > c2['open']) and (c3['close'] > c3['open'])
+        is_higher = (c3['close'] > c2['close'] > c1['close'])
+        
+        is_3_red = (c1['close'] < c1['open']) and (c2['close'] < c2['open']) and (c3['close'] < c3['open'])
+        is_lower = (c3['close'] < c2['close'] < c1['close'])
+
+        if is_3_green and is_higher:
+            found.append(
+                f"🟢 <b>Друг, растем! (15M лесенка вверх)</b>\n"
+                f"🪙 <b>#{symbol}</b>\n"
+                f"📈 Закрытия: <code>{round(c1['close'], 4)}</code> → <code>{round(c2['close'], 4)}</code> → <code>{round(c3['close'], 4)}</code>\n"
+                f"👀 Глянь на график, дальше по обстоятельствам!"
+            )
+        elif is_3_red and is_lower:
+            found.append(
+                f"🔴 <b>Друг, падаем! (15M лесенка вниз)</b>\n"
+                f"🪙 <b>#{symbol}</b>\n"
+                f"📉 Закрытия: <code>{round(c1['close'], 4)}</code> → <code>{round(c2['close'], 4)}</code> → <code>{round(c3['close'], 4)}</code>\n"
+                f"👀 Глянь на график, дальше по обстоятельствам!"
+            )
+
     return found, radar_item
 
 if __name__ == "__main__":
@@ -141,9 +173,3 @@ if __name__ == "__main__":
         time.sleep(0.5)
 
     # Радар в 09:00 и 21:00 по Алматы (04:00 и 16:00 UTC) или при ручном запуске
-    utc_hour = datetime.datetime.now(datetime.timezone.utc).hour
-    is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
-    if is_manual or utc_hour in (4, 16):
-        radar.sort(key=lambda x: x[0])
-        top_radar = "\n".join([x[1] for x in radar[:6]])
-        send_telegram(f"📡 <b>РАДАР ЛИКВИДНОСТИ (24H / 7D)</b>\n{btc_txt}\n\nБлиже всего к снятию уровней:\n{top_radar}")
