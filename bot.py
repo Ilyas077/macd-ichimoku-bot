@@ -130,9 +130,13 @@ def analyze_coin(symbol, btc_code, btc_txt):
             sl = round(max(c['ema100'], day_high) * 1.005, 4)
             found.append(f"⚡🔴 <b>ТРЕНД EMA 50/100 ({tf.upper()}) — ШОРТ</b>\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(live_p, 4)}</code>\n🎯 Цель: <code>{tp}</code>\n🛡️ Стоп: <code>{sl}</code>\n🚂 {btc_txt}")
 
-    # 3. СВЕЧНАЯ ЛЕСЕНКА НА 15M (3 зеленые вверх или 3 красные вниз)
+    # 3. СВЕЧНАЯ ЛЕСЕНКА НА 15M (Локальный коридор за 10 часов + только первая половина пути <= 50%)
     df_15m = get_candles(symbol, "15m", 10)
-    if df_15m is not None and len(df_15m) >= 5:
+    loc_high = df_1h.iloc[-12:-2]['high'].max()
+    loc_low = df_1h.iloc[-12:-2]['low'].min()
+    loc_range = loc_high - loc_low
+
+    if df_15m is not None and len(df_15m) >= 5 and loc_range > 0:
         c1, c2, c3 = df_15m.iloc[-4], df_15m.iloc[-3], df_15m.iloc[-2]
         
         is_3_green = (c1['close'] > c1['open']) and (c2['close'] > c2['open']) and (c3['close'] > c3['open'])
@@ -141,35 +145,17 @@ def analyze_coin(symbol, btc_code, btc_txt):
         is_3_red = (c1['close'] < c1['open']) and (c2['close'] < c2['open']) and (c3['close'] < c3['open'])
         is_lower = (c3['close'] < c2['close'] < c1['close'])
 
-        if is_3_green and is_higher:
+        # Положение в локальном 10-часовом коридоре: 0.0 = дно, 0.5 = середина, 1.0 = потолок
+        pos_in_loc = (c3['close'] - loc_low) / loc_range
+
+        # РОСТ: пишем только в нижней половине локального коридора (0% - 50%)
+        if is_3_green and is_higher and (0.0 <= pos_in_loc <= 0.50):
+            stage = "🚀 Самое начало со дна" if pos_in_loc <= 0.25 else "📈 Первая половина пути"
+            to_top_pct = round(((loc_high - c3['close']) / c3['close']) * 100, 2)
             found.append(
                 f"🟢 <b>Друг, растем! (15M лесенка вверх)</b>\n"
-                f"🪙 <b>#{symbol}</b>\n"
+                f"🪙 <b>#{symbol}</b> | {stage} ({int(pos_in_loc*100)}% от 10ч дна)\n"
                 f"📈 Закрытия: <code>{round(c1['close'], 4)}</code> → <code>{round(c2['close'], 4)}</code> → <code>{round(c3['close'], 4)}</code>\n"
+                f"🎯 До локального потолка еще: <b>{to_top_pct}%</b> (<code>{round(loc_high, 4)}</code>)\n"
                 f"👀 Глянь на график, дальше по обстоятельствам!"
             )
-        elif is_3_red and is_lower:
-            found.append(
-                f"🔴 <b>Друг, падаем! (15M лесенка вниз)</b>\n"
-                f"🪙 <b>#{symbol}</b>\n"
-                f"📉 Закрытия: <code>{round(c1['close'], 4)}</code> → <code>{round(c2['close'], 4)}</code> → <code>{round(c3['close'], 4)}</code>\n"
-                f"👀 Глянь на график, дальше по обстоятельствам!"
-            )
-
-    return found, radar_item
-
-if __name__ == "__main__":
-    btc_code, btc_txt = get_btc_trend()
-    all_signals, radar = [], []
-
-    for sym in SYMBOLS:
-        sigs, r_item = analyze_coin(sym, btc_code, btc_txt)
-        all_signals.extend(sigs)
-        if r_item: radar.append(r_item)
-        time.sleep(0.5)
-
-    for s in all_signals:
-        send_telegram(s)
-        time.sleep(0.5)
-
-    # Радар в 09:00 и 21:00 по Алматы (04:00 и 16:00 UTC) или при ручном запуске
