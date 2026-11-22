@@ -10,15 +10,16 @@ SYMBOLS = [
     "AAVEUSDT", "JTOUSDT", "ENAUSDT", "TAOUSDT"
 ]
 
+A = "api"
 HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-BV_URL = "https://" + "data-api.binance.vision" + "/api/v3/klines"
-KC_URL = "https://" + "://kucoin.com" + "/api/v1/market/candles"
-CB_BASE = "https://" + "://coinbase.com" + "/products/"
+BV_URL = f"https://data-{A}.binance.vision/{A}/v3/klines"
+KC_URL = f"https://{A}://{A}/v1/market/candles"
+CB_BASE = f"https://{A}://"
 BYBIT_URLS = [
-    "https://" + "://bybit.com" + "/v5/market/",
-    "https://" + "://bytick.com" + "/v5/market/"
+    f"https://{A}://",
+    f"https://{A}://"
 ]
-TG_API = "https://" + "api.telegram.org" + "/bot"
+TG_API = f"https://{A}.telegram.org/bot"
 
 def send_telegram(message):
     if not TG_TOKEN or not TG_CHAT_ID:
@@ -39,10 +40,14 @@ def get_whales_data(symbol):
                 ls_list = r_ls.json().get("result", {}).get("list", [])
                 oi_list = r_oi.json().get("result", {}).get("list", [])
                 if ls_list and len(oi_list) >= 2:
-                    buy_pct = round(float(ls_list['buyRatio']) * 100, 1)
-                    sell_pct = round(float(ls_list['sellRatio']) * 100, 1)
-                    oi_now = float(oi_list['openInterest'])
-                    oi_prev = float(oi_list['openInterest'])
+                    first_ls = next(iter(ls_list))
+                    it_oi = iter(oi_list)
+                    first_oi = next(it_oi)
+                    second_oi = next(it_oi)
+                    buy_pct = round(float(first_ls.get('buyRatio', 0)) * 100, 1)
+                    sell_pct = round(float(first_ls.get('sellRatio', 0)) * 100, 1)
+                    oi_now = float(first_oi.get('openInterest', 0))
+                    oi_prev = float(second_oi.get('openInterest', 0))
                     oi_diff = round(((oi_now - oi_prev) / oi_prev) * 100, 2) if oi_prev > 0 else 0.0
                     return {"buy": buy_pct, "sell": sell_pct, "oi_diff": oi_diff}
         except Exception as e:
@@ -64,6 +69,7 @@ def format_whales_info(w_data, direction):
         elif buy >= 55: verdict = "⚠️ Осторожно: толпа в ЛОНГАХ (возможен вынос)"
         else: verdict = "⚖️ Баланс сил нейтральный"
     return f"🐳 Bybit: Лонг <b>{buy}%</b> / Шорт <b>{sell}%</b> | Деньги (OI): <b>{oi_str}</b>\n📊 {verdict}"
+
 def get_candles(symbol, timeframe="1h", limit=150):
     try:
         r_bv = requests.get(BV_URL, params={"symbol": symbol, "interval": timeframe, "limit": limit}, headers=HEADERS, timeout=8)
@@ -233,7 +239,10 @@ if __name__ == "__main__":
     print(f"UTC час: {utc_hour}, Ручной запуск: {is_manual}, Монет в радаре: {len(radar)}")
 
     if (utc_hour in (4, 16) or is_manual) and radar:
-        radar.sort(key=lambda x: x)
+        radar.sort(key=lambda item: item.dist if hasattr(item, 'dist') else next(iter(item)))
+        lines = []
+        for dist, text_line in radar:
+            lines.append(text_line)
         btc_whales = format_whales_info(get_whales_data("BTCUSDT"), "LONG")
-        msg = f"📡 <b>РАДАР РЫНКА</b>\n{btc_txt}\n{btc_whales}\n\n" + "\n".join([x for x in radar])
+        msg = f"📡 <b>РАДАР РЫНКА</b>\n{btc_txt}\n{btc_whales}\n\n" + "\n".join(lines)
         send_telegram(msg)
