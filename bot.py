@@ -11,13 +11,13 @@ SYMBOLS = [
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-BV_URL = "https:" + "//data-api.binance.vision" + "/api/v3/klines"
-CB_BASE = "https:" + "//://coinbase.com" + "/products/"
+BV_URL = "https://binance.vision"
+CB_BASE = "https://coinbase.com"
 BYBIT_URLS = [
-    "https:" + "//://bybit.com" + "/v5/market/",
-    "https:" + "//://bytick.com" + "/v5/market/"
+    "https://bybit.com",
+    "https://bytick.com"
 ]
-TG_API = "https:" + "//api.telegram.org" + "/bot"
+TG_API = "https://telegram.org"
 
 def send_telegram(message):
     if not TG_TOKEN or not TG_CHAT_ID:
@@ -40,14 +40,16 @@ def get_whales_data(symbol):
                 oi_list = r_oi.json().get("result", {}).get("list", [])
                 
                 if ls_list and len(oi_list) >= 2:
-                    buy_pct = round(float(ls_list['buyRatio']) * 100, 1)
-                    sell_pct = round(float(ls_list['sellRatio']) * 100, 1)
+                    buy_pct = round(float(ls_list[0]['buyRatio']) * 100, 1)
+                    sell_pct = round(float(ls_list[0]['sellRatio']) * 100, 1)
                     
-                    oi_now = float(oi_list['openInterest'])
-                    oi_prev = float(oi_list['openInterest'])
+                    oi_now = float(oi_list[0]['openInterest'])
+                    oi_prev = float(oi_list[1]['openInterest'])
                     oi_diff = round(((oi_now - oi_prev) / oi_prev) * 100, 2) if oi_prev > 0 else 0.0
                     
                     return {"buy": buy_pct, "sell": sell_pct, "oi_diff": oi_diff}
+            else:
+                print(f"Bybit статус ({base}): LS={r_ls.status_code}, OI={r_oi.status_code}")
         except Exception as e:
             print(f"Ошибка Bybit ({base}): {e}")
             continue
@@ -251,7 +253,7 @@ if __name__ == "__main__":
     print(f"UTC час: {utc_hour}, Ручной запуск: {is_manual}, Монет в радаре: {len(radar)}")
 
     if (utc_hour in (4, 16) or is_manual) and radar:
-        radar.sort(key=lambda x: x)
+        radar.sort(key=lambda x: x[0])
         btc_whales = format_whales_info(get_whales_data("BTCUSDT"), "LONG")
-        msg = f"📡 <b>РАДАР РЫНКА</b>\n{btc_txt}\n{btc_whales}\n\n" + "\n".join([x for x in radar])
+        msg = f"📡 <b>РАДАР РЫНКА</b>\n{btc_txt}\n{btc_whales}\n\n" + "\n".join([x[1] for x in radar])
         send_telegram(msg)
