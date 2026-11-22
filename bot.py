@@ -30,7 +30,6 @@ def send_telegram(message):
         print(f"СБОЙ СЕТИ TG: {e}")
 
 def get_whales_data(symbol):
-    """Получает соотношение Лонг/Шорт и изменение Открытого Интереса (новые деньги) с Bybit"""
     for base in BYBIT_URLS:
         try:
             r_ls = requests.get(base + "account-ratio", params={"category": "linear", "symbol": symbol, "period": "15min", "limit": 2}, headers=HEADERS, timeout=6)
@@ -113,7 +112,6 @@ def get_candles(symbol, timeframe="1h", limit=150):
                 return df
     except Exception: pass
     return None
-
 def add_indicators(df):
     df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['ema100'] = df['close'].ewm(span=100, adjust=False).mean()
@@ -153,7 +151,6 @@ def analyze_coin(symbol, btc_code, btc_txt):
     radar_item = (min_dist, f"• <b>{symbol.replace('USDT', '')}</b> (${round(live_p, 4)}): {near_side} | RSI {round(curr['rsi'], 1)}")
 
     found = []
-    # 1. РАЗВОРОТНЫЕ СИГНАЛЫ
     swept_24h_top = (curr['high'] >= day_high) and (curr['close'] < day_high) and (curr['rsi'] > 66)
     swept_7d_top = (df_1d.iloc[-1]['high'] >= week_high) and (curr['close'] < week_high) and (curr['rsi'] > 65)
     if (swept_24h_top or swept_7d_top) and (symbol == "BTCUSDT" or btc_code != "BULL"):
@@ -172,7 +169,6 @@ def analyze_coin(symbol, btc_code, btc_txt):
         w_txt = format_whales_info(get_whales_data(symbol), "LONG")
         found.append(f"🌊🟢 <b>СНЯТ МИНИМУМ {tag} — ЛОНГ</b>\n🪙 <b>#{symbol}</b> | RSI: {round(curr['rsi'], 1)}\n💵 Вход: <code>{round(live_p, 4)}</code>\n🎯 Цель: <code>{round(day_high, 4)}</code>\n🛡️ Стоп: <code>{sl}</code>\n{w_txt}\n🚂 {btc_txt}")
 
-    # 2. ТРЕНДОВЫЕ СИГНАЛЫ
     for tf in ("1h", "4h"):
         df_tf = df_1h if tf == "1h" else get_candles(symbol, "4h", 130)
         if df_tf is None or len(df_tf) < 105: continue
@@ -180,3 +176,82 @@ def analyze_coin(symbol, btc_code, btc_txt):
         c, p = df_tf.iloc[-2], df_tf.iloc[-3]
         if (p['ema50'] <= p['ema100']) and (c['ema50'] > c['ema100']) and (symbol == "BTCUSDT" or btc_code != "BEAR"):
             tp = round(day_high, 4) if d_up_pct >= 1.2 else round(week_high, 4)
+            sl = round(min(c['ema100'], day_low) * 0.995, 4)
+            w_txt = format_whales_info(get_whales_data(symbol), "LONG")
+            found.append(f"⚡🟢 <b>ТРЕНД EMA 50/100 ({tf.upper()}) — ЛОНГ</b>\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(live_p, 4)}</code>\n🎯 Цель: <code>{tp}</code>\n🛡️ Стоп: <code>{sl}</code>\n{w_txt}\n🚂 {btc_txt}")
+        elif (p['ema50'] >= p['ema100']) and (c['ema50'] < c['ema100']) and (symbol == "BTCUSDT" or btc_code != "BULL"):
+            tp = round(day_low, 4) if d_dn_pct >= 1.2 else round(week_low, 4)
+            sl = round(max(c['ema100'], day_high) * 1.005, 4)
+            w_txt = format_whales_info(get_whales_data(symbol), "SHORT")
+            found.append(f"⚡🔴 <b>ТРЕНД EMA 50/100 ({tf.upper()}) — ШОРТ</b>\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(live_p, 4)}</code>\n🎯 Цель: <code>{tp}</code>\n🛡️ Стоп: <code>{sl}</code>\n{w_txt}\n🚂 {btc_txt}")
+
+    df_15m = get_candles(symbol, "15m", 10)
+    loc_high = df_1h.iloc[-12:-2]['high'].max()
+    loc_low = df_1h.iloc[-12:-2]['low'].min()
+    loc_range = loc_high - loc_low
+
+    if df_15m is not None and len(df_15m) >= 5 and loc_range > 0:
+        c1, c2, c3 = df_15m.iloc[-4], df_15m.iloc[-3], df_15m.iloc[-2]
+        
+        is_3_green = (c1['close'] > c1['open']) and (c2['close'] > c2['open']) and (c3['close'] > c3['open'])
+        is_higher = (c3['close'] > c2['close'] > c1['close'])
+        
+        is_3_red = (c1['close'] < c1['open']) and (c2['close'] < c2['open']) and (c3['close'] < c3['open'])
+        is_lower = (c3['close'] < c2['close'] < c1['close'])
+
+        pos_in_loc = (c3['close'] - loc_low) / loc_range
+
+        if is_3_green and is_higher and (0.0 <= pos_in_loc <= 0.50):
+            stage = "🚀 Самое начало со дна" if pos_in_loc <= 0.25 else "📈 Первая половина пути"
+            to_top_pct = round(((loc_high - c3['close']) / c3['close']) * 100, 2)
+            w_txt = format_whales_info(get_whales_data(symbol), "LONG")
+            found.append(
+                f"🟢 <b>Друг, растем! (15M лесенка вверх)</b>\n"
+                f"🪙 <b>#{symbol}</b> | {stage} ({int(pos_in_loc*100)}% от 10ч дна)\n"
+                f"📈 Закрытия: <code>{round(c1['close'], 4)}</code> → <code>{round(c2['close'], 4)}</code> → <code>{round(c3['close'], 4)}</code>\n"
+                f"🎯 До локального потолка еще: <b>{to_top_pct}%</b> (<code>{round(loc_high, 4)}</code>)\n"
+                f"{w_txt}\n"
+                f"👀 Глянь на график, дальше по обстоятельствам!"
+            )
+        elif is_3_red and is_lower and (0.50 <= pos_in_loc <= 1.0):
+            down_progress = 1.0 - pos_in_loc
+            stage = "📉 Самое начало с верхов" if down_progress <= 0.25 else "🔻 Первая половина падения"
+            to_bot_pct = round(((c3['close'] - loc_low) / c3['close']) * 100, 2)
+            w_txt = format_whales_info(get_whales_data(symbol), "SHORT")
+            found.append(
+                f"🔴 <b>Друг, падаем! (15M лесенка вниз)</b>\n"
+                f"🪙 <b>#{symbol}</b> | {stage} ({int(down_progress*100)}% от 10ч верха)\n"
+                f"📉 Закрытия: <code>{round(c1['close'], 4)}</code> → <code>{round(c2['close'], 4)}</code> → <code>{round(c3['close'], 4)}</code>\n"
+                f"🎯 До локального дна еще: <b>{to_bot_pct}%</b> (<code>{round(loc_low, 4)}</code>)\n"
+                f"{w_txt}\n"
+                f"👀 Глянь на график, дальше по обстоятельствам!"
+            )
+
+    print(f"[{symbol}] Проверено. Сигналов: {len(found)}")
+    return found, radar_item
+
+if __name__ == "__main__":
+    print("--- ЗАПУСК СКАНЕРА ---")
+    btc_code, btc_txt = get_btc_trend()
+    print(f"Тренд BTC: {btc_txt}")
+    all_signals, radar = [], []
+
+    for sym in SYMBOLS:
+        sigs, r_item = analyze_coin(sym, btc_code, btc_txt)
+        all_signals.extend(sigs)
+        if r_item: radar.append(r_item)
+        time.sleep(0.5)
+
+    for s in all_signals:
+        send_telegram(s)
+        time.sleep(0.5)
+
+    utc_hour = datetime.datetime.now(datetime.timezone.utc).hour
+    is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    print(f"UTC час: {utc_hour}, Ручной запуск: {is_manual}, Монет в радаре: {len(radar)}")
+
+    if (utc_hour in (4, 16) or is_manual) and radar:
+        radar.sort(key=lambda x: x)
+        btc_whales = format_whales_info(get_whales_data("BTCUSDT"), "LONG")
+        msg = f"📡 <b>РАДАР РЫНКА</b>\n{btc_txt}\n{btc_whales}\n\n" + "\n".join([x for x in radar])
+        send_telegram(msg)
