@@ -2,7 +2,7 @@ name: Liquidity & EMA 50/100 Scanner
 
 on:
   schedule:
-    - cron: '2 * * * *'
+    - cron: '2,17,32,47 * * * *'
   workflow_dispatch:
 
 jobs:
