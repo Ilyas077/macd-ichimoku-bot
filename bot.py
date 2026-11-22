@@ -13,6 +13,10 @@ SYMBOLS = [
 HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 BV_URL = "https:" + "//data-api.binance.vision" + "/api/v3/klines"
 CB_BASE = "https:" + "//://coinbase.com" + "/products/"
+BYBIT_URLS = [
+    "https:" + "//://bybit.com" + "/v5/market/",
+    "https:" + "//://bytick.com" + "/v5/market/"
+]
 TG_API = "https:" + "//api.telegram.org" + "/bot"
 
 def send_telegram(message):
@@ -24,6 +28,60 @@ def send_telegram(message):
         print(f"TG {r.status_code}: {r.text[:80]}")
     except Exception as e:
         print(f"СБОЙ СЕТИ TG: {e}")
+
+def get_whales_data(symbol):
+    """Получает соотношение Лонг/Шорт и изменение Открытого Интереса (новые деньги) с Bybit"""
+    for base in BYBIT_URLS:
+        try:
+            # 1. Соотношение Лонг / Шорт (период 15m)
+            r_ls = requests.get(base + "account-ratio", params={"category": "linear", "symbol": symbol, "period": "15min", "limit": 2}, headers=HEADERS, timeout=6)
+            # 2. Открытый интерес (новые деньги за 1 час)
+            r_oi = requests.get(base + "open-interest", params={"category": "linear", "symbol": symbol, "intervalTime": "1h", "limit": 2}, headers=HEADERS, timeout=6)
+            
+            if r_ls.status_code == 200 and r_oi.status_code == 200:
+                ls_list = r_ls.json().get("result", {}).get("list", [])
+                oi_list = r_oi.json().get("result", {}).get("list", [])
+                
+                if ls_list and len(oi_list) >= 2:
+                    buy_pct = round(float(ls_list['buyRatio']) * 100, 1)
+                    sell_pct = round(float(ls_list['sellRatio']) * 100, 1)
+                    
+                    oi_now = float(oi_list['openInterest'])
+                    oi_prev = float(oi_list['openInterest'])
+                    oi_diff = round(((oi_now - oi_prev) / oi_prev) * 100, 2) if oi_prev > 0 else 0.0
+                    
+                    return {
+                        "buy": buy_pct,
+                        "sell": sell_pct,
+                        "oi_diff": oi_diff
+                    }
+        except Exception:
+            continue
+    return None
+
+def format_whales_info(w_data, direction):
+    if not w_data:
+        return "🐳 Киты (Bybit): нет данных"
+    
+    buy, sell, oi = w_data["buy"], w_data["sell"], w_data["oi_diff"]
+    oi_str = f"+{oi}%" if oi > 0 else f"{oi}%"
+    
+    if direction == "LONG":
+        if buy >= 55 and oi > 0:
+            verdict = "✅ Деньги и крупняк заходят в ЛОНГ"
+        elif sell >= 55:
+            verdict = "⚠️ Осторожно: на бирже перевес ШОРТОВ"
+        else:
+            verdict = "⚖️ Баланс сил нейтральный"
+    else: # SHORT
+        if sell >= 55 and oi > 0:
+            verdict = "✅ Деньги и крупняк давят в ШОРТ"
+        elif buy >= 55:
+            verdict = "⚠️ Осторожно: толпа в ЛОНГАХ (возможен вынос)"
+        else:
+            verdict = "⚖️ Баланс сил нейтральный"
+
+    return f"🐳 Bybit: Лонг <b>{buy}%</b> / Шорт <b>{sell}%</b> | Деньги (OI): <b>{oi_str}</b>\n📊 {verdict}"
 
 def get_candles(symbol, timeframe="1h", limit=150):
     try:
@@ -105,7 +163,8 @@ def analyze_coin(symbol, btc_code, btc_txt):
         lvl = round(week_high if swept_7d_top else day_high, 4)
         tag = "7D НЕДЕЛИ" if swept_7d_top else "24H СУТОК"
         sl = round(max(curr['high'], lvl) * 1.005, 4)
-        found.append(f"🌊🔴 <b>СНЯТ МАКСИМУМ {tag} — ШОРТ</b>\n🪙 <b>#{symbol}</b> | RSI: {round(curr['rsi'], 1)}\n💵 Вход: <code>{round(live_p, 4)}</code>\n🎯 Цель: <code>{round(day_low, 4)}</code>\n🛡️ Стоп: <code>{sl}</code>\n🚂 {btc_txt}")
+        w_txt = format_whales_info(get_whales_data(symbol), "SHORT")
+        found.append(f"🌊🔴 <b>СНЯТ МАКСИМУМ {tag} — ШОРТ</b>\n🪙 <b>#{symbol}</b> | RSI: {round(curr['rsi'], 1)}\n💵 Вход: <code>{round(live_p, 4)}</code>\n🎯 Цель: <code>{round(day_low, 4)}</code>\n🛡️ Стоп: <code>{sl}</code>\n{w_txt}\n🚂 {btc_txt}")
 
     swept_24h_bot = (curr['low'] <= day_low) and (curr['close'] > day_low) and (curr['rsi'] < 34)
     swept_7d_bot = (df_1d.iloc[-1]['low'] <= week_low) and (curr['close'] > week_low) and (curr['rsi'] < 35)
@@ -113,7 +172,8 @@ def analyze_coin(symbol, btc_code, btc_txt):
         lvl = round(week_low if swept_7d_bot else day_low, 4)
         tag = "7D НЕДЕЛИ" if swept_7d_bot else "24H СУТОК"
         sl = round(min(curr['low'], lvl) * 0.995, 4)
-        found.append(f"🌊🟢 <b>СНЯТ МИНИМУМ {tag} — ЛОНГ</b>\n🪙 <b>#{symbol}</b> | RSI: {round(curr['rsi'], 1)}\n💵 Вход: <code>{round(live_p, 4)}</code>\n🎯 Цель: <code>{round(day_high, 4)}</code>\n🛡️ Стоп: <code>{sl}</code>\n🚂 {btc_txt}")
+        w_txt = format_whales_info(get_whales_data(symbol), "LONG")
+        found.append(f"🌊🟢 <b>СНЯТ МИНИМУМ {tag} — ЛОНГ</b>\n🪙 <b>#{symbol}</b> | RSI: {round(curr['rsi'], 1)}\n💵 Вход: <code>{round(live_p, 4)}</code>\n🎯 Цель: <code>{round(day_high, 4)}</code>\n🛡️ Стоп: <code>{sl}</code>\n{w_txt}\n🚂 {btc_txt}")
 
     # 2. ТРЕНДОВЫЕ СИГНАЛЫ (Пересечение EMA 50/100 на 1H и 4H)
     for tf in ("1h", "4h"):
@@ -121,41 +181,3 @@ def analyze_coin(symbol, btc_code, btc_txt):
         if df_tf is None or len(df_tf) < 105: continue
         if tf == "4h": df_tf = add_indicators(df_tf)
         c, p = df_tf.iloc[-2], df_tf.iloc[-3]
-        if (p['ema50'] <= p['ema100']) and (c['ema50'] > c['ema100']) and (symbol == "BTCUSDT" or btc_code != "BEAR"):
-            tp = round(day_high, 4) if d_up_pct >= 1.2 else round(week_high, 4)
-            sl = round(min(c['ema100'], day_low) * 0.995, 4)
-            found.append(f"⚡🟢 <b>ТРЕНД EMA 50/100 ({tf.upper()}) — ЛОНГ</b>\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(live_p, 4)}</code>\n🎯 Цель: <code>{tp}</code>\n🛡️ Стоп: <code>{sl}</code>\n🚂 {btc_txt}")
-        elif (p['ema50'] >= p['ema100']) and (c['ema50'] < c['ema100']) and (symbol == "BTCUSDT" or btc_code != "BULL"):
-            tp = round(day_low, 4) if d_dn_pct >= 1.2 else round(week_low, 4)
-            sl = round(max(c['ema100'], day_high) * 1.005, 4)
-            found.append(f"⚡🔴 <b>ТРЕНД EMA 50/100 ({tf.upper()}) — ШОРТ</b>\n🪙 <b>#{symbol}</b>\n💵 Вход: <code>{round(live_p, 4)}</code>\n🎯 Цель: <code>{tp}</code>\n🛡️ Стоп: <code>{sl}</code>\n🚂 {btc_txt}")
-
-    # 3. СВЕЧНАЯ ЛЕСЕНКА НА 15M (Локальный коридор за 10 часов + только первая половина пути <= 50%)
-    df_15m = get_candles(symbol, "15m", 10)
-    loc_high = df_1h.iloc[-12:-2]['high'].max()
-    loc_low = df_1h.iloc[-12:-2]['low'].min()
-    loc_range = loc_high - loc_low
-
-    if df_15m is not None and len(df_15m) >= 5 and loc_range > 0:
-        c1, c2, c3 = df_15m.iloc[-4], df_15m.iloc[-3], df_15m.iloc[-2]
-        
-        is_3_green = (c1['close'] > c1['open']) and (c2['close'] > c2['open']) and (c3['close'] > c3['open'])
-        is_higher = (c3['close'] > c2['close'] > c1['close'])
-        
-        is_3_red = (c1['close'] < c1['open']) and (c2['close'] < c2['open']) and (c3['close'] < c3['open'])
-        is_lower = (c3['close'] < c2['close'] < c1['close'])
-
-        # Положение в локальном 10-часовом коридоре: 0.0 = дно, 0.5 = середина, 1.0 = потолок
-        pos_in_loc = (c3['close'] - loc_low) / loc_range
-
-        # РОСТ: пишем только в нижней половине локального коридора (0% - 50%)
-        if is_3_green and is_higher and (0.0 <= pos_in_loc <= 0.50):
-            stage = "🚀 Самое начало со дна" if pos_in_loc <= 0.25 else "📈 Первая половина пути"
-            to_top_pct = round(((loc_high - c3['close']) / c3['close']) * 100, 2)
-            found.append(
-                f"🟢 <b>Друг, растем! (15M лесенка вверх)</b>\n"
-                f"🪙 <b>#{symbol}</b> | {stage} ({int(pos_in_loc*100)}% от 10ч дна)\n"
-                f"📈 Закрытия: <code>{round(c1['close'], 4)}</code> → <code>{round(c2['close'], 4)}</code> → <code>{round(c3['close'], 4)}</code>\n"
-                f"🎯 До локального потолка еще: <b>{to_top_pct}%</b> (<code>{round(loc_high, 4)}</code>)\n"
-                f"👀 Глянь на график, дальше по обстоятельствам!"
-            )
