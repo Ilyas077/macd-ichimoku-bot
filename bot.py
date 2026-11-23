@@ -55,29 +55,30 @@ def send_telegram(text: str):
 
 def get_candles(symbol: str, interval: str, limit: int = 250):
     try:
-        params = {
-            "category": "linear",
-            "symbol": symbol,
-            "interval": interval,
-            "limit": limit
-        }
-        resp = requests.get(BYBIT_URL, params=params, timeout=10).json()
-        raw_list = resp.get("result", {}).get("list", [])
-        if len(raw_list) > 205:
+        b_int = "1h" if interval == "60" else "4h"
+        resp = requests.get(
+            BINANCE_URL,
+            params={"symbol": symbol, "interval": b_int, "limit": limit},
+            timeout=10
+        ).json()
+        if isinstance(resp, list) and len(resp) > 205:
             candles = []
-            for item in reversed(raw_list[1:]):
+            for item in resp[:-1]:
+                it = iter(item)
                 candles.append({
-                    "time": int(item),
-                    "open": float(item),
-                    "high": float(item),
-                    "low": float(item),
-                    "close": float(item),
-                    "volume": float(item)
+                    "time": int(next(it)),
+                    "open": float(next(it)),
+                    "high": float(next(it)),
+                    "low": float(next(it)),
+                    "close": float(next(it)),
+                    "volume": float(next(it))
                 })
             return candles
     except Exception as e:
-        print(f"Bybit err {symbol}: {e}", flush=True)
+        print(f"Binance err {symbol}: {e}", flush=True)
 
+    return []
+def get_candles(symbol: str, interval: str, limit: int = 250):
     try:
         b_int = "1h" if interval == "60" else "4h"
         resp = requests.get(
@@ -88,20 +89,22 @@ def get_candles(symbol: str, interval: str, limit: int = 250):
         if isinstance(resp, list) and len(resp) > 205:
             candles = []
             for item in resp[:-1]:
+                it = iter(item)
                 candles.append({
-                    "time": int(item),
-                    "open": float(item),
-                    "high": float(item),
-                    "low": float(item),
-                    "close": float(item),
-                    "volume": float(item)
+                    "time": int(next(it)),
+                    "open": float(next(it)),
+                    "high": float(next(it)),
+                    "low": float(next(it)),
+                    "close": float(next(it)),
+                    "volume": float(next(it))
                 })
             return candles
     except Exception as e:
-        print(f"Binance backup err {symbol}: {e}", flush=True)
+        print(f"Binance err {symbol}: {e}", flush=True)
 
     return []
 
+               
 
 def calc_ema(prices: list, period: int) -> float:
     if len(prices) < period:
